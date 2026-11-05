@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "memai": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "-p", "memai-cli", "memai-mcp", "--root", "${CLAUDE_PROJECT_DIR:-.}"]
+    }
+  }
+}

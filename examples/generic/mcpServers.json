@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "memai": {
+      "command": "npx",
+      "args": ["-y", "-p", "memai-cli", "memai-mcp"]
+    }
+  }
+}

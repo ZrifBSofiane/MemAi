@@ -1,0 +1,71 @@
+{
+  "name": "memai-cli",
+  "version": "0.1.0",
+  "description": "Paged memory for coding agents: a ~200-token project card plus a symbol manifest, demand-paged detail and Merkle deltas, shared by Claude Code, Codex, OpenCode, ZCode and DSH through one MCP server or one CLI.",
+  "type": "module",
+  "license": "MIT",
+  "author": "MemAi contributors",
+  "private": false,
+  "bin": {
+    "memai": "./bin/memai.mjs",
+    "memai-mcp": "./bin/memai-mcp.mjs",
+    "memai-cli": "./bin/memai.mjs"
+  },
+  "exports": {
+    ".": "./src/page.mjs",
+    "./store": "./src/store.mjs",
+    "./extract": "./src/extract.mjs",
+    "./tokens": "./src/tokens.mjs",
+    "./cli": "./src/mem-cli.mjs",
+    "./mcp/server": "./mcp/server.mjs",
+    "./mcp/tools": "./mcp/tools.mjs",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "bin/",
+    "src/",
+    "mcp/",
+    "adapters/",
+    "docs/",
+    "examples/",
+    "PROTOCOL.md",
+    "CHANGELOG.md",
+    "CONTRIBUTING.md",
+    "SECURITY.md",
+    "LICENSE",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=22.13"
+  },
+  "scripts": {
+    "test": "node --test \"test/*.test.mjs\"",
+    "selftest": "node bench/selftest.mjs",
+    "bench": "node bench/bench.mjs",
+    "probe": "node scripts/mcp-probe.mjs"
+  },
+  "keywords": [
+    "ai-agent",
+    "mcp",
+    "mcp-server",
+    "claude-code",
+    "codex",
+    "opencode",
+    "zcode",
+    "deepseek-harness",
+    "memory",
+    "context-engineering",
+    "tokens",
+    "prompt-caching",
+    "sqlite",
+    "codebase-index"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ZrifBSofiane/MemAi.git"
+  },
+  "bugs": {
+    "url": "https://github.com/ZrifBSofiane/MemAi/issues"
+  },
+  "homepage": "https://github.com/ZrifBSofiane/MemAi#readme"
+}

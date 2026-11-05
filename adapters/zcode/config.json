@@ -1,0 +1,30 @@
+{
+  "mcp": {
+    "servers": {
+      "memai": {
+        "type": "stdio",
+        "command": "npx",
+        "args": ["-y", "-p", "memai-cli", "memai-mcp"],
+        "timeoutMs": 30000
+      }
+    }
+  },
+  "hooks": {
+    "enabled": true,
+    "events": {
+      "SessionStart": [
+        {
+          "matcher": "startup|resume",
+          "hooks": [
+            {
+              "type": "process",
+              "command": "npx",
+              "args": ["-y", "-p", "memai-cli", "memai", "hook", "card"],
+              "timeoutMs": 20000
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

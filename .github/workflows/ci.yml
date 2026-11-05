@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: test (Node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # node:sqlite (used by the store) ships from Node 22.13; Node 20 has no
+        # such module, so the supported matrix starts at 22.
+        node: [22, 24]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+
+      - name: Confirm the zero-install claim
+        run: |
+          node --version
+          test ! -d node_modules
+          test ! -f package-lock.json
+
+      - name: Self-test (store, paging, budgets, diff, merge)
+        run: node bench/selftest.mjs
+
+      - name: Unit and MCP protocol tests
+        # A glob, not `test/`: Node's runner treats a bare directory argument as
+        # an entry module (verified on Node 24.14, Windows and Linux).
+        run: node --test "test/*.test.mjs"
+
+      - name: MCP server syntax
+        run: node --check mcp/server.mjs
+
+      - name: MCP handshake probe (live JSON-RPC over stdio)
+        run: node scripts/mcp-probe.mjs

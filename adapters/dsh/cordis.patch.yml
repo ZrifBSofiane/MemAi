@@ -1,0 +1,7 @@
+- insert:
+    - id: memai
+      name: '@local/dsh-memai'
+      config:
+        # empty dbPath = $DSH_HOME/memai/memai.db
+        dbPath: ''
+        cardMaxTokens: 120

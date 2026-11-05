@@ -1,0 +1,27 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|clear|compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "npx -y -p memai-cli memai hook card",
+            "timeout": 30
+          }
+        ]
+      }
+    ],
+    "SubagentStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "npx -y -p memai-cli memai hook card --event SubagentStart",
+            "timeout": 30
+          }
+        ]
+      }
+    ]
+  }
+}

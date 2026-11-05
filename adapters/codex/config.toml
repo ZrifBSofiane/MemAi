@@ -1,0 +1,10 @@
+# Append to ~/.codex/config.toml (global). Project-local config.toml support is not verified;
+# the AGENTS.md block is the project-local half of this adapter.
+
+[mcp_servers.memai]
+command = "npx"
+args = ["-y", "-p", "memai-cli", "memai-mcp"]
+
+# Pin the store for monorepos / non-git roots (optional; the server otherwise walks up from its cwd
+# to the nearest .git or .memai directory):
+# env = { MEMAI_ROOT = "/absolute/path/to/project" }

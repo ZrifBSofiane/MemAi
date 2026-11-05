@@ -1,0 +1,12 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "servers": {
+      "memai": {
+        "type": "local",
+        "command": ["npx", "-y", "-p", "memai-cli", "memai-mcp"],
+        "cwd": "."
+      }
+    }
+  }
+}

@@ -1,0 +1,33 @@
+# --- MemAi store: local SQLite index, generated on demand, never commit it ---
+.memai/
+# Legacy store directories from pre-rename checkouts (read-only back-compat).
+.memory/
+.mempages/
+
+# --- Generated benchmark artifacts and fixtures ---
+bench/results.json
+.tmp/
+.bench/
+bench/.tmp/
+bench/.bench/
+bench/fixtures/
+*.db
+*.db-shm
+*.db-wal
+*.db-journal
+*.sqlite
+*.sqlite3
+
+# --- Deps / tooling ---
+node_modules/
+coverage/
+*.tgz
+*.log
+
+# --- OS / editor noise ---
+.DS_Store
+Thumbs.db
+desktop.ini
+.idea/
+.vscode/
+*.swp
