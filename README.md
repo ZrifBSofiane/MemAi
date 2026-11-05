@@ -114,6 +114,11 @@ hundreds of tokens, not thousands.
 
 ## Quick start
 
+> **npm publish is pending.** Until `memai-cli` is on npm, install straight from
+> this repo — `npm i -g github:ZrifBSofiane/MemAi` — or clone it and run
+> `node bin/memai.mjs …`. The `npx` commands below are the intended published
+> form (the `memai-cli` name was free on npm at release time).
+
 ```bash
 # 1. Create the store, index the repo, write per-agent instructions + MCP snippets
 npx -y memai-cli init --agent all
