@@ -34,6 +34,13 @@ this directory's `AGENTS.md` is the instruction text; `memai init` writes an equ
 
 Docs: https://developers.openai.com/codex/guides/agents-md
 
+## Skill (Agent Skills)
+
+Codex scans the shared Agent Skills root (cwd upward) and `~/.agents/skills`; the canonical
+[`../../skills/memai/SKILL.md`](../../skills/memai/SKILL.md) is installed there by
+`memai skill install --agent codex` (or by `memai init`, which does it by default). No copy of the
+skill lives in this adapter. Docs: https://developers.openai.com/codex/skills
+
 ## Config reference
 
 - MCP: https://developers.openai.com/codex/mcp

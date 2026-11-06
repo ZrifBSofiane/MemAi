@@ -1,14 +1,15 @@
 # Install & per-agent setup
 
-MemAi has two surfaces, and either one is enough:
+MemAi has three surfaces, and any one is enough:
 
 - an **MCP server** (`memai-mcp`) with one `mem` tool, for agents that speak MCP;
-- a **CLI** (`memai`) with JSON output, for agents that can run shell commands.
+- a **CLI** (`memai`) with JSON output, for agents that can run shell commands;
+- a portable **Agent Skills** package (`skills/memai/SKILL.md`), for agents that load `SKILL.md`
+  (Claude Code, Codex, OpenCode, ZCode, DSH, Cursor, Gemini CLI, …).
 
-Plus an optional in-process **DSH plugin** (`adapters/dsh/`, experimental). For the
-MCP server and the CLI the store is always the same: `.memai/mem.db` inside the
-project, resolved from `--root`, `MEMAI_ROOT`, or the nearest `.git`/`.memai`
-ancestor.
+Plus an optional in-process **DSH plugin** (`adapters/dsh/`, experimental). For the MCP server and
+the CLI the store is always the same: `.memai/mem.db` inside the project, resolved from `--root`,
+`MEMAI_ROOT`, or the nearest `.git`/`.memai` ancestor.
 
 ## Prerequisites
 
@@ -50,6 +51,8 @@ same server).
 | `.memai/configs/opencode.json` | OpenCode v2 `mcp.servers.memai` entry |
 | `.memai/configs/zcode-config.json` | ZCode `mcp.servers` entry + process hook |
 | `.memai/configs/generic-mcp.json` | generic `mcpServers` object |
+| `.agents/skills/memai/SKILL.md` | the Agent Skills package — portable root (Codex, OpenCode, ZCode, DSH, Cursor, Gemini, generic) |
+| `.claude/skills/memai/SKILL.md` | the same skill for Claude Code (its only project skill root; also read by OpenCode/Cursor) |
 
 The snippets in `.memai/configs/` are generated for **this checkout** with absolute
 `node`/`bin` paths (they work offline). The portable, commit-friendly forms are in
@@ -59,16 +62,18 @@ Useful flags:
 
 | Flag | Effect |
 | --- | --- |
-| `--agent claude,codex,opencode,zcode,dsh,generic` | limit which instruction files/configs are produced (repeatable; default: auto-detect) |
+| `--agent claude,codex,opencode,zcode,dsh,generic` | limit which instruction files/configs/skill roots are produced (repeatable; default: auto-detect) |
 | `--md` | print the instruction block and write nothing (preview) |
 | `--write-configs` | also merge `.mcp.json` (Claude Code) and `opencode.json` safely, preserving every other key |
+| `--no-skill` | do not install the Agent Skills package (`memai skill install` can add it later) |
 | `--no-index` | create the store without indexing the repository |
 | `--max-files N` | cap indexed files (default 4000) |
 | `--force` | re-extract unchanged files |
 | `--root DIR` / `--db FILE` | override the project root / store file |
 
 `init` is idempotent: a second run reports `changed: 0 file(s)` and leaves the
-store, instruction blocks and configs untouched. It never rewrites source files.
+store, instruction blocks and configs untouched; the skill copies are compared by
+content hash and report `already installed`. It never rewrites source files.
 
 After the first index, the usual loop is:
 
@@ -79,6 +84,63 @@ memai fault verifyToken             # one function body, budget-clamped
 memai index                         # local, after edits/checkouts
 memai diff --since <version>        # in the next session or a subagent
 ```
+
+## Agent Skills (one skill, every agent)
+
+The skill is the third surface: a portable `SKILL.md` that tells the agent *when* to page versus
+read. It is standard Agent Skills frontmatter only (`name`, `description`, `license`,
+`compatibility`, `metadata`) — no provider-specific fields — so strict clients accept it.
+`init` installs it by default; manage it with:
+
+```bash
+memai skill install            # project scope, all agents (default)
+memai skill install --agent claude          # one agent alias
+memai skill install --global   # user scope: ~/.agents/skills + ~/.claude/skills
+memai skill install --link     # symlink/junction instead of copying (checkout workflow)
+memai skill install --force    # replace a target that differs
+memai skill list               # where it is installed / missing / differs
+memai skill status             # same, with a summary count
+```
+
+Per the verified Agent Skills matrix, **two project roots cover everything**:
+
+| Install path | Agents that scan it | Status |
+| --- | --- | --- |
+| `<root>/.agents/skills/memai/SKILL.md` | Codex (cwd upward), OpenCode v2, ZCode (depth-1), DSH (rank 200), Cursor, Gemini CLI (alias), generic SKILL.md hosts | documented; DSH from its shipped `dsh-skill-filesystem` README |
+| `<root>/.claude/skills/memai/SKILL.md` | Claude Code (its **only** project skill root — verified: it does not scan `.agents/skills`), also OpenCode and Cursor | ✅ verified live on Claude Code 2.1.140 |
+
+`--global` writes the two user equivalents: `~/.agents/skills/memai/` and
+`~/.claude/skills/memai/`. Per-agent flags are aliases that map onto those two roots
+(`claude` → `.claude`; `codex|opencode|zcode|dsh|generic` → `.agents`); they never create extra
+copies. Optional roots some agents also scan — `~/.zcode/skills`, `~/.gemini/skills`,
+`~/.dsh/skills`, `<root>/.zcode/skills`, `<root>/.gemini/skills`, `<root>/.codex/skills` — are
+redundant aliases of `~/.agents/skills`/`.agents/skills` and are **not** written by default; add
+them only if your agent version ignores the shared root.
+
+Rules the installer enforces:
+
+- **depth-1 layout**: `.agents/skills/memai/SKILL.md` (never an umbrella `skills/memai/` dir with
+  the file one level deeper);
+- both copies are **byte-identical** to `skills/memai/SKILL.md` and re-runs are content-hash
+  idempotent (`unchanged`, no rewrite, no timestamp churn);
+- an existing `memai` skill directory with different content is **never clobbered** without
+  `--force` (the CLI exits 1 so scripts notice; `init` reports it as a manual step);
+- `--link` uses a directory symlink (junction on Windows) when the OS allows it and falls back to
+  a copy otherwise.
+
+**Verify.** The skill's name + description (a few hundred tokens) appear in the agent's skill
+catalog while the body loads only when activated:
+
+- Claude Code: `/skills` lists `memai`, and `/memai` runs it. Debug evidence:
+  `claude --init-only --debug-file log` shows `Loading skills from: … project=[<proj>\.claude\skills]`
+  and `Loaded N unique skills (… project: 1 …)`.
+- OpenCode: the skill appears in the `<available_skills>` catalog (docs).
+- DSH: the skill catalog lists it from `.agents/skills` (rank 200).
+- Codex/ZCode/Cursor/Gemini: the skill appears in each agent's skills list (documented; those
+  CLIs are not installed on the build machine).
+
+Docs: https://agentskills.io/specification · per-agent links in
+[`compatibility.md`](compatibility.md#agent-skills-skillmd-support).
 
 ## Claude Code
 
@@ -158,8 +220,16 @@ without the hook schema). No model call is involved: the hook only reads
 variant that uses this checkout's absolute `node`/`bin` paths (handy offline); the
 adapter file above is the portable, committed form.
 
-**Skill (optional).** Copy `adapters/claude-code/SKILL.md` to
-`.claude/skills/memai/SKILL.md` to teach the agent when to page versus read.
+**Skill.** `init` installs it to `.claude/skills/memai/SKILL.md`; to manage it directly:
+
+```bash
+memai skill install --agent claude            # project
+memai skill install --agent claude --global   # ~/.claude/skills
+```
+
+Claude Code's project skill root is `.claude/skills/` only — it does **not** scan
+`.agents/skills/` (verified), which is why `--agent all` writes both roots. `/skills` lists it and
+`/memai` invokes it; the body loads on demand.
 
 **Verify.** `claude mcp list` should show `memai` as connected (the client starts
 the server for its health check); `/mcp` inside Claude Code shows the tool list.
@@ -180,7 +250,12 @@ starts MCP servers from a fixed directory, add `"--root"` and the absolute path.
 
 **Instructions.** `init` maintains the block in `AGENTS.md`.
 
-**Verify.** Restart Codex and ask it to list MCP tools; `mem` should be present.
+**Skill.** Codex scans `.agents/skills/` (walking cwd upward) and `~/.agents/skills/`;
+`memai skill install --agent codex` (already done by `init`) puts the canonical skill there.
+Docs: https://developers.openai.com/codex/skills
+
+**Verify.** Restart Codex and ask it to list MCP tools; `mem` should be present, and the skill
+should appear in its skills catalog.
 
 ## OpenCode
 
@@ -225,6 +300,11 @@ the project `opencode.json` without touching other keys.
 arrives through the tool call. OpenCode appends a server's
 `initialize.instructions` to the system prompt, so MemAi's short paging contract
 arrives without a tool call. The tool is named `memai_mem` in this client.
+
+**Skill.** OpenCode v2 scans `.agents/skills/` and `.claude/skills/` (project) plus
+`~/.agents/skills/` and `~/.claude/skills/` (user); `memai skill install --agent opencode`
+installs the shared `.agents` copy. The skill shows up in OpenCode's `<available_skills>` catalog
+once the project/session reloads. Docs: https://opencode.ai/docs/skills/
 
 **Verify.** `opencode mcp list` should report `✓ memai connected`.
 
@@ -285,6 +365,12 @@ store exists (a no-op, exit 0).
 `AGENTS.md`, capped at 100 KiB) and `.memai/configs/zcode-config.json` holds the
 mergeable snippet. Full shapes and sources: [`../adapters/zcode/`](../adapters/zcode/).
 
+**Skill.** ZCode scans `.agents/skills/` and `.zcode/skills/` at project scope (depth-1: the
+skill dir itself must contain `SKILL.md`) and `~/.agents/skills/` + `~/.zcode/skills/` at user
+scope. The default install writes the shared `.agents` copy; `.zcode/skills/memai` is an optional
+alias if your ZCode build ignores `.agents`. `memai skill install --agent zcode` (or `init`) is
+enough. Docs: https://zcode.z.ai/en/docs/skill
+
 **Fallback if a ZCode version changes the keys:** use
 `.memai/configs/generic-mcp.json` (or the CLI-only workflow below) and keep the
 `AGENTS.md` block.
@@ -303,6 +389,11 @@ Then configure DSH's MCP client entry the way it documents stdio servers
 
 **CLI.** DSH agents can run `memai card`, `memai query`, `memai fault` from a
 shell tool without any MCP configuration.
+
+**Skill.** DSH's `dsh-skill-filesystem` scans `<project>/.dsh/skills/` (rank 100) and
+`<project>/.agents/skills/` (rank 200), plus `~/.agents/skills/`; the default `memai skill
+install --agent dsh` writes `.agents/skills/memai/`, so no `.dsh/` copy is needed. Add
+`.dsh/skills/memai` manually only if a host configuration disables the `.agents` root.
 
 **In-process plugin (experimental).** `adapters/dsh/` is a Cordis bundle that
 registers a `mem` tool and appends a project card to every in-process agent's
@@ -339,6 +430,13 @@ each vendor's docs, are in [`../adapters/generic/README.md`](../adapters/generic
 The server needs no environment variables; optionally set `MEMAI_ROOT` if the
 client's working directory is not the project root.
 
+**Skill.** Agents in this group that support Agent Skills scan `.agents/skills/` (project) and
+`~/.agents/skills/` (user) — `memai skill install --agent generic` writes the project copy, and
+`--global` the user one. Cursor also reads `.claude/skills/`; Gemini CLI also scans
+`.gemini/skills/` (alias of `.agents`). Docs:
+https://agentskills.io/specification, https://cursor.com/docs/skills,
+https://geminicli.com/docs/cli/skills/
+
 ## No MCP? Use the CLI
 
 Every paged operation is one command with JSON on stdout and a `tokens` field.
@@ -374,14 +472,18 @@ Rules of thumb (measured, see [`../bench/RESULTS.md`](../bench/RESULTS.md)):
 | Tool results look stale | `memai index`; line numbers/symbols come from the index, `fault <path>:<line>` reads the file directly |
 | Card never injected in Claude Code | the hook must be in `.claude/settings.json` (project) or user settings; test `memai hook card` by hand — once the store is indexed it must print one JSON object, before that it prints nothing (a safe no-op) |
 | Agent ignores the memory block | it is advisory text; make sure `CLAUDE.md`/`AGENTS.md` is actually read by that agent, or use the MCP tool descriptions |
+| Skill does not appear in the agent | run `memai skill list`; if the target is `missing`, `memai skill install --agent <name>`; if `differs`, re-run with `--force`. Confirm the agent scans that root (Claude Code: `.claude/skills` only; others: `.agents/skills`), then restart/reload the agent |
+| `memai skill install` exits 1 with `conflict` | a `memai` skill directory with different content exists; review it, then re-run with `--force` to replace it |
 
 ## Uninstall
 
 ```bash
 rm -rf .memai/                     # store + generated config snippets
+rm -rf .agents/skills/memai .claude/skills/memai   # skill copies (project scope)
 # then remove the <!-- memai:start --> … <!-- memai:end --> block from CLAUDE.md / AGENTS.md
 # and the "memai" entry from .mcp.json / opencode.json / ~/.codex/config.toml
+# user-scope skill copies: rm -rf ~/.agents/skills/memai ~/.claude/skills/memai
 ```
 
-MemAi writes nothing outside the project except the config edits you apply
-yourself.
+MemAi writes only inside the project (and, with `--global`, the two user skill roots
+`~/.agents/skills` / `~/.claude/skills`) apart from the config edits you apply yourself.

@@ -12,3 +12,4 @@
 import './mcp.test.mjs'
 import './init.test.mjs'
 import './hook.test.mjs'
+import './skill.test.mjs'

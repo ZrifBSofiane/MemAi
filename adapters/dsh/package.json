@@ -1,6 +1,6 @@
 {
   "name": "@local/dsh-memai",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "description": "MemAi for DeepSeek Harness: a tiny project card in every agent context plus an on-demand mem tool.",
   "type": "module",

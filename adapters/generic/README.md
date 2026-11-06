@@ -42,6 +42,22 @@ Zed's key is genuinely different (`context_servers`, no top-level `mcpServers`);
 generic JSON into Zed unchanged. Gemini CLI appends a server's `initialize.instructions` to the
 system prompt, so MemAi's paging contract arrives without a tool call.
 
+## Skill (Agent Skills)
+
+Agent Skills clients (Cursor, Gemini CLI, Codex-style hosts, generic SKILL.md loaders) pick up
+MemAi automatically from the shared Agent Skills root. The canonical file is
+[`../../skills/memai/SKILL.md`](../../skills/memai/SKILL.md); install it with:
+
+```sh
+memai skill install --agent generic     # project: .agents/skills/memai/SKILL.md
+memai skill install --global            # user: ~/.agents/skills/memai/SKILL.md
+```
+
+`--agent all` writes `.agents/skills/memai/` **and** `.claude/skills/memai/` (Claude Code only
+scans the latter; OpenCode and Cursor read both). `memai init` installs the skill by default.
+Frontmatter is standard-only (`name`, `description`, `license`, `compatibility`, `metadata`), so
+strict clients accept it. Docs: https://agentskills.io/specification
+
 ## No MCP? Use the CLI
 
 Every operation is also a thin CLI over the same store, so any agent with a shell can use MemAi.

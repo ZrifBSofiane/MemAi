@@ -1,26 +1,31 @@
 // `memai init` — one-command onboarding for any coding agent.
 //
 // What it does, in order:
-//   1. creates <root>/.memai/mem.db (WAL SQLite) and indexes the repo locally
+//   1. installs the portable Agent Skills package (`skills/memai/` -> `.agents/skills` and
+//      `.claude/skills`) so supported agents pick MemAi up from their skill catalog;
+//   2. creates <root>/.memai/mem.db (WAL SQLite) and indexes the repo locally
 //      (0 model tokens);
-//   2. writes an idempotent instruction block with `<!-- memai:start/end -->`
+//   3. writes an idempotent instruction block with `<!-- memai:start/end -->`
 //      markers into CLAUDE.md (Claude Code) and/or AGENTS.md (Codex, OpenCode,
 //      ZCode, DSH, generic);
-//   3. drops ready-to-paste MCP config snippets into .memai/configs/;
-//   4. with --write-configs: safely merges .mcp.json (Claude Code, project
+//   4. drops ready-to-paste MCP config snippets into .memai/configs/;
+//   5. with --write-configs: safely merges .mcp.json (Claude Code, project
 //      scope) and opencode.json — only the `memai` server entry is touched,
 //      every other key is preserved; unparseable files are never overwritten;
-//   5. prints exactly what changed and the manual step(s) that remain.
+//   6. prints exactly what changed and the manual step(s) that remain.
 //
 // Second run changes nothing: store/index are content-addressed, instruction
-// blocks are replaced in place, JSON merges serialise identically.
+// blocks are replaced in place, JSON merges serialise identically, and the skill
+// install is compared by content hash.
 //
 // `--md` is a preview mode: prints the instruction block(s) and writes nothing.
+// `--no-skill` skips step 1.
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { MemoryStore } from './store.mjs'
 import { MemoryPages } from './page.mjs'
+import { installSkills, canonicalSkillDir } from './skill.mjs'
 import { PRODUCT, VERSION, STORE_DIR, DB_FILE, ROOT_ENV } from '../mcp/paths.mjs'
 
 export const INIT_MARKER_START = '<!-- memai:start -->'
@@ -48,6 +53,7 @@ export const INIT_HELP = `Usage: memai init [options]
                       Default: auto-detect from CLAUDE.md, .claude/, opencode.json,
                       .codex/, .zcode/, installed CLIs; falls back to generic.
   --write-configs     also merge .mcp.json (Claude Code) and opencode.json safely
+  --no-skill          do not install the Agent Skills package (skills/memai/)
   --md                print the instruction block(s) as Markdown and exit (writes nothing)
   --no-index          create the store but skip indexing the repository
   --max-files N       cap the indexed file count (default 4000)
@@ -56,6 +62,8 @@ export const INIT_HELP = `Usage: memai init [options]
   --db FILE           store file (default: <root>/.memai/${DB_FILE})
   --help              this help
 
+Installs the portable skill into <root>/.agents/skills/memai and <root>/.claude/skills/memai
+(the two roots agents actually scan), unless --no-skill.
 Idempotent: a second run changes nothing. Store is <root>/.memai/mem.db.
 `
 
@@ -384,7 +392,21 @@ export async function runInit(argv = [], { env = process.env, cwd = process.cwd(
   const storeDir = path.dirname(db)
   fs.mkdirSync(storeDir, { recursive: true })
 
-  // 1. Store + index (local, deterministic, idempotent by content hash).
+  // 1. Agent Skills package: one canonical skill copied into the two roots agents scan.
+  //    Installed before indexing so the store sees a stable corpus. Conflicts never abort init.
+  let skillResult = null
+  if (!flags['no-skill']) {
+    try {
+      skillResult = installSkills({ root, env, agents, sourceDir: canonicalSkillDir() })
+    } catch (err) {
+      skillResult = {
+        ok: false, source: canonicalSkillDir(), scope: 'project', base: root,
+        results: [], changed: 0, conflicts: 0, errors: 1, error: err?.message ?? String(err),
+      }
+    }
+  }
+
+  // 2. Store + index (local, deterministic, idempotent by content hash).
   let indexResult = null
   let storeAction = 'existing'
   const hadStore = fs.existsSync(db)
@@ -400,7 +422,7 @@ export async function runInit(argv = [], { env = process.env, cwd = process.cwd(
   }
   if (!hadStore) storeAction = 'created'
 
-  // 2. Instruction blocks (idempotent markers, merged not clobbered).
+  // 3. Instruction blocks (idempotent markers, merged not clobbered).
   const instructionFiles = [...new Set(agents.flatMap((a) => AGENT_TARGETS[a]))]
   const block = instructionBlock({ agents })
   for (const name of instructionFiles) {
@@ -415,14 +437,14 @@ export async function runInit(argv = [], { env = process.env, cwd = process.cwd(
     }
   }
 
-  // 3. Ready-to-paste MCP config snippets.
+  // 4. Ready-to-paste MCP config snippets.
   const configDir = path.join(storeDir, 'configs')
   for (const [name, content] of Object.entries(configSnippets({ root }))) {
     const w = writeIfChanged(path.join(configDir, name), content)
     if (w.action !== 'unchanged') changed.push({ file: `configs/${name}`, action: w.action })
   }
 
-  // 4. --write-configs: merge the two project-scope config files that tolerate it.
+  // 5. --write-configs: merge the two project-scope config files that tolerate it.
   if (flags['write-configs']) {
     if (agents.includes('claude')) {
       const file = path.join(root, '.mcp.json')
@@ -454,7 +476,7 @@ export async function runInit(argv = [], { env = process.env, cwd = process.cwd(
     }
   }
 
-  // 5. What is left for a human (or an agent) to do.
+  // 6. What is left for a human (or an agent) to do.
   if (agents.includes('claude')) {
     if (flags['write-configs']) {
       manualSteps.push('Claude Code: .mcp.json holds the `memai` server — approve it on next start (`claude mcp list`), or add it manually with `claude mcp add -s project memai -- npx -y -p memai-cli memai-mcp`.')
@@ -480,9 +502,23 @@ export async function runInit(argv = [], { env = process.env, cwd = process.cwd(
   if (agents.includes('generic')) {
     manualSteps.push('Generic MCP clients (Cursor/Zed/Cline/Gemini/…): point the client at .memai/configs/generic-mcp.json.')
   }
-  manualSteps.push('Restart/reload your agent so it picks up the new MCP server and instruction files.')
+  if (skillResult) {
+    if (skillResult.error) {
+      manualSteps.push(`Skill: could not install the Agent Skills package (${skillResult.error}); run \`memai skill install\` manually.`)
+    } else if (skillResult.conflicts) {
+      for (const conflict of skillResult.results.filter((r) => r.action === 'conflict')) {
+        manualSteps.push(`Skill: ${path.relative(root, conflict.path)} exists with different content — run \`memai skill install --force\` to replace it.`)
+      }
+    } else if (skillResult.changed) {
+      const dirs = skillResult.results.filter((r) => r.action === 'created' || r.action === 'updated').map((r) => path.relative(root, r.path))
+      manualSteps.push(`Skill: installed in ${dirs.join(', ')} — the agent lists it in its skill catalog (Claude Code: /skills, /memai).`)
+    }
+  } else if (flags['no-skill']) {
+    manualSteps.push('Skill: skipped (--no-skill). Run `memai skill install --agent all` later to add it.')
+  }
+  manualSteps.push('Restart/reload your agent so it picks up the new MCP server, instruction files and skill.')
 
-  // 6. Human summary.
+  // 7. Human summary.
   const lines = [
     `${PRODUCT} init — root ${root}`,
     `store: ${path.relative(root, db) || db} (${storeAction})`,
@@ -499,12 +535,24 @@ export async function runInit(argv = [], { env = process.env, cwd = process.cwd(
     ? `changed: ${changed.length} file(s) — ${changed.map((c) => `${c.file} ${c.action}`).join(', ')}`
     : 'changed: 0 file(s) (already up to date)')
   lines.push(`instructions: ${instructionFiles.join(', ')}`)
+  if (!skillResult) {
+    lines.push('skills: skipped (--no-skill)')
+  } else if (skillResult.error) {
+    lines.push(`skills: failed (${skillResult.error})`)
+  } else {
+    const skillChanged = skillResult.results.filter((r) => r.action === 'created' || r.action === 'updated')
+    const dirs = skillResult.results.map((r) => path.relative(root, r.path))
+    lines.push(skillChanged.length
+      ? `skills: ${skillChanged.length} installed — ${skillChanged.map((r) => path.relative(root, r.path)).join(', ')}`
+      : `skills: already installed (${dirs.join(', ')})`)
+    if (skillResult.conflicts) lines.push(`skills: ${skillResult.conflicts} conflicting target(s) — re-run \`memai skill install --force\``)
+  }
   lines.push('manual steps:')
   for (const step of manualSteps) lines.push(`  - ${step}`)
   lines.push('')
   lines.push('next: `memai card` (or the `mem` MCP tool with {"op":"card"})')
 
-  const result = { ok: true, root, db, agents, index: indexResult, changed, manualSteps, text: lines.join('\n') + '\n' }
+  const result = { ok: true, root, db, agents, index: indexResult, skills: skillResult, changed, manualSteps, text: lines.join('\n') + '\n' }
   if (out) out.write(result.text)
   return result
 }

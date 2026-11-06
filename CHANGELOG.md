@@ -4,6 +4,48 @@ All notable changes to this project are documented here. The format is loosely
 based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the
 project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.1] — 2026-11-06
+
+Portable Agent Skills package + `memai skill` installer.
+
+### Added
+
+- **One portable skill** — [`skills/memai/SKILL.md`](skills/memai/SKILL.md) in
+  standard Agent Skills format (`name`, `description`, `license`,
+  `compatibility`, `metadata` string map only; no provider-specific fields, so
+  strict clients accept it unchanged). The body covers when MemAi wins vs a plain
+  file read (measured ~346-token / ~1.3 KB break-even), the card → query → fault
+  → get → diff workflow, the `mem` MCP tool **and** the `memai` CLI fallback,
+  token-budget discipline and the common pitfalls.
+- **`memai skill install|list|status`** — installs the canonical skill into the
+  two roots agents actually scan: `.agents/skills/memai/SKILL.md` (Codex,
+  OpenCode, ZCode, DSH, Cursor, Gemini CLI, generic SKILL.md hosts) and
+  `.claude/skills/memai/SKILL.md` (Claude Code — its only project skill root —
+  also read by OpenCode and Cursor). Flags: `--agent
+  all|claude|codex|opencode|zcode|dsh|generic`, `--global` (`~/.agents/skills`,
+  `~/.claude/skills`), `--link` (symlink/junction, copy fallback), `--force`.
+  Content-hash idempotent (re-runs report `unchanged`); a differing `memai`
+  skill directory is never overwritten without `--force`.
+- **`memai init` installs the skill by default** and reports it in the summary;
+  `--no-skill` skips it. Init re-runs stay idempotent.
+- **`test/skill.test.mjs`** — frontmatter portability, both install roots,
+  per-agent aliases, idempotency, `--force` conflict handling, `--link`,
+  `--global` with a HOME override, `list`/`status` output, and the init
+  integration (`node --test "test/*.test.mjs"` now covers 42 tests).
+
+### Changed
+
+- Adapters no longer duplicate the skill: `adapters/claude-code/SKILL.md` is
+  removed and every adapter README points at `skills/memai/` as the single
+  source of truth; the config snippets are unchanged.
+- Docs: README gains a "Skills — one file, every agent" section;
+  [`docs/install.md`](docs/install.md) documents per-agent skill roots, global
+  scope, optional fallback roots and verification (Claude Code `/skills`,
+  OpenCode `<available_skills>`, DSH catalog);
+  [`docs/compatibility.md`](docs/compatibility.md) gains an Agent Skills matrix
+  with vendor doc links and the live Claude Code discovery evidence.
+- `package.json`: version `0.1.1`, `files` now ships `skills/`.
+
 ## [0.1.0] — 2026-11-05
 
 First public preview.

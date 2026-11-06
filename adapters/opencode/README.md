@@ -56,6 +56,14 @@ OpenCode loads `AGENTS.md` from the workspace up to the project root (and a glob
 `memai init` writes a guarded `<!-- memai:start -->` block into the project `AGENTS.md`.
 Docs: https://opencode.ai/v2/docs/instructions
 
+## Skill (Agent Skills)
+
+OpenCode v2 scans `.agents/skills` (project) and `~/.agents/skills` (user), so the canonical
+[`../../skills/memai/SKILL.md`](../../skills/memai/SKILL.md) is picked up after
+`memai skill install --agent opencode` (or `memai init`); OpenCode also reads `.claude/skills`.
+The skill appears in OpenCode's `<available_skills>` catalog. No copy lives in this adapter.
+Docs: https://opencode.ai/docs/skills/
+
 ## Verification status
 
 Verified on this machine with `opencode` v2.2.5: config shape (`mcp.servers`), `opencode mcp add`

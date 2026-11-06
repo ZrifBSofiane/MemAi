@@ -2,7 +2,8 @@
 // `memai` — the MemAi CLI entry point.
 //
 // Thin dispatch layer:
-//   memai init ...        -> src/init.mjs (store + index + instruction blocks + configs)
+//   memai init ...        -> src/init.mjs (store + index + instruction blocks + configs + skill)
+//   memai skill ...       -> src/skill.mjs (Agent Skills installer: install|list|status)
 //   memai mcp ...         -> mcp/server.mjs (stdio MCP server)
 //   memai hook card ...   -> mcp/hook.mjs (SessionStart additionalContext JSON)
 //   memai <command> ...   -> src/cli.mjs core (index|status|card|map|diff|get|query|
@@ -13,18 +14,29 @@
 // Every forwarded command gets an explicit --root/--db so the public CLI and the
 // MCP server always read the same store.
 import path from 'node:path'
+import fs from 'node:fs'
 import { run, render } from '../src/mem-cli.mjs'
 import { runInit } from '../src/init.mjs'
+import { runSkillCommand } from '../src/skill.mjs'
 import { startServer } from '../mcp/server.mjs'
 import { hookCardPayload } from '../mcp/hook.mjs'
 import { PRODUCT, VERSION, resolveRoot, resolveDb } from '../mcp/paths.mjs'
 
-const HELP = `${PRODUCT} ${VERSION} — paged project memory for coding agents
+// The CLI reports the published package version (package.json is always shipped); the MCP
+// server's advertised version lives in mcp/paths.mjs and is bumped separately there.
+const PKG_VERSION = (() => {
+  try { return JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version || VERSION } catch { return VERSION }
+})()
+
+const HELP = `${PRODUCT} ${PKG_VERSION} — paged project memory for coding agents
 
 Usage:
-  memai init [--agent claude|codex|opencode|zcode|dsh|generic|all] [--write-configs] [--md]
+  memai init [--agent claude|codex|opencode|zcode|dsh|generic|all] [--write-configs] [--no-skill] [--md]
              Create .memai/ store, index the repo, write instruction blocks
-             (CLAUDE.md / AGENTS.md) and ready MCP config snippets.
+             (CLAUDE.md / AGENTS.md), ready MCP config snippets and the Agent Skills package.
+  memai skill install|list|status [--agent NAME|all] [--global] [--link] [--force] [--root DIR]
+                                  Install/verify the portable skill (skills/memai/) in the roots
+                                  agents scan (.agents/skills, .claude/skills).
   memai mcp [--root DIR]          Run the stdio MCP server (same as memai-mcp).
   memai hook card [--event E]     Print Claude Code SessionStart hook JSON with the
                                   project card as additionalContext (--text for raw text).
@@ -37,6 +49,8 @@ Global: --root DIR  --db FILE  --text  --cpt N   (env: MEMAI_ROOT, MEMAI_DB, MEM
 
 Examples:
   memai init --agent all
+  memai skill install --agent all
+  memai skill list
   memai card
   memai query "verify token" && memai fault verifyToken --budget 400
   memai diff --since <version>
@@ -79,13 +93,24 @@ async function main() {
   const cmd = parsed.positional[0] ?? 'help'
   const sub = parsed.positional[1] ?? ''
 
-  if (cmd === 'help' || cmd === '--help' || cmd === '-h') { process.stdout.write(HELP); return 0 }
-  if (cmd === '--version' || cmd === '-v' || cmd === 'version') { process.stdout.write(`${PRODUCT.toLowerCase()} ${VERSION}\n`); return 0 }
+  if (cmd === '--version' || cmd === '-v' || cmd === 'version' || parsed.flags.version) {
+    process.stdout.write(`${PRODUCT.toLowerCase()} ${PKG_VERSION}\n`)
+    return 0
+  }
+  if (cmd === 'help' || parsed.flags.help) { process.stdout.write(HELP); return 0 }
 
   if (cmd === 'init') {
     const result = await runInit(argv, {})
     process.stdout.write((result.text ?? '') + (result.text?.endsWith('\n') ? '' : '\n'))
     return result.ok ? 0 : 1
+  }
+
+  if (cmd === 'skill') {
+    const skillArgs = argv.slice(argv.indexOf('skill') + 1)
+    const root = resolveRoot({ root: parsed.flags.root === true ? null : parsed.flags.root })
+    const result = runSkillCommand(skillArgs, { root, env: process.env, cwd: process.cwd() })
+    if (result.text) process.stdout.write(result.text)
+    return result.code
   }
 
   if (cmd === 'mcp') {

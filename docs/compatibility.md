@@ -33,6 +33,8 @@ node --test "test/*.test.mjs"           # preferred: per-file isolation, skips t
 node scripts/mcp-probe.mjs              # live handshake + tool/resource/prompt surface
 node --check mcp/server.mjs
 node adapters/dsh/test/apply.test.mjs   # DSH plugin against a fake Cordis host
+node bin/memai.mjs skill install --root /tmp/scratch --agent all   # Agent Skills installer
+node bin/memai.mjs skill list --root /tmp/scratch
 ```
 
 ---
@@ -71,6 +73,55 @@ Note the argument names differ between Claude Code and ZCode (`command` shell st
 
 ---
 
+## Agent Skills (SKILL.md) support
+
+MemAi ships **one** portable skill: [`skills/memai/SKILL.md`](../skills/memai/SKILL.md). It uses
+standard Agent Skills frontmatter only (`name`, `description`, `license`, `compatibility`,
+`metadata` string map). Provider-only fields (`allowed-tools`, `context`, `agent`,
+`disable-model-invocation`, `user-invocable`, DSH `whenToUse`, dynamic `` !`cmd` `` injection) are
+deliberately absent, so strict clients accept the file unchanged. Format:
+[agentskills.io/specification](https://agentskills.io/specification).
+
+`memai skill install` writes exactly two destinations per scope; per-agent flags are aliases that
+map onto them (they never create extra copies):
+
+| Scope | Destination | Agents that scan it | Status |
+| --- | --- | --- | --- |
+| project | `<root>/.agents/skills/memai/` | Codex (cwd upward), OpenCode v2, ZCode (depth-1), DSH (rank 200), Cursor, Gemini CLI (alias), generic SKILL.md hosts | 📖 documented |
+| project | `<root>/.claude/skills/memai/` | Claude Code (**only** project skill root), OpenCode, Cursor | ✅ verified live |
+| global | `~/.agents/skills/memai/` | Codex, OpenCode, ZCode, DSH, Cursor, Gemini CLI, generic | 📖 documented |
+| global | `~/.claude/skills/memai/` | Claude Code, OpenCode, Cursor | ✅ verified live (root list) |
+
+Agent → alias → destination: `claude` → `.claude`; `codex`, `opencode`, `zcode`, `dsh`, `generic`
+→ `.agents`. `--agent all` (the default, and what `memai init` uses) writes both project roots.
+Redundant per-agent roots some implementations also scan (`.zcode/skills`, `.gemini/skills`,
+`.dsh/skills`, `.codex/skills`, `~/.zcode/skills`, `~/.gemini/skills`) are documented in
+[`install.md`](install.md#agent-skills-one-skill-every-agent) and are not written by default.
+
+| Agent | Skill root(s) | Status / source |
+| --- | --- | --- |
+| Claude Code | `.claude/skills/<name>/SKILL.md`; `~/.claude/skills/` | ✅ verified live: `claude --init-only --debug-file` printed `Loading skills from: … project=[<proj>\.claude\skills]` and `Loaded N unique skills (… project: 1 …)` after installing `memai`. Docs: https://code.claude.com/docs/en/skills |
+| OpenCode v2 | `.agents/skills`, `.claude/skills`, `.opencode/skills` (+ user equivalents) | 📖 documented: https://opencode.ai/docs/skills/ |
+| Codex CLI | `.agents/skills` (scans cwd upward), `~/.agents/skills` | 📖 documented: https://developers.openai.com/codex/skills |
+| ZCode | `.agents/skills`, `.zcode/skills` (depth-1), user equivalents | 📖 documented: https://zcode.z.ai/en/docs/skill |
+| DSH | `.agents/skills` (rank 200), `.dsh/skills` (rank 100), `~/.agents/skills` | ✅ documented from the shipped `@deepseek-ai/dsh-skill-filesystem` README (asar) |
+| Cursor | `.agents/skills`, `.cursor/skills`, also `.claude/skills`, `.codex/skills` | 📖 documented: https://cursor.com/docs/skills |
+| Gemini CLI | `.agents/skills` (alias), `.gemini/skills` | 📖 documented: https://geminicli.com/docs/cli/skills/ |
+
+Cost: clients inject only the skill's name + description per turn (a few hundred tokens; body
+loads on activation), so one shared skill is cheap — which is why the installer never plants
+multiple overlapping copies.
+
+Verify:
+
+```sh
+memai skill list                 # installed / missing / differs per scope
+memai skill status
+claude --init-only --debug-file log   # Claude Code: "Loaded N unique skills (… project: 1)"
+```
+
+---
+
 ## Claude Code (verified)
 
 Docs: [hooks](https://code.claude.com/docs/en/hooks) · [MCP](https://code.claude.com/docs/en/mcp) ·
@@ -102,13 +153,16 @@ the optional `SubagentStart` entry.
 | add/get/remove across scopes | `claude mcp add -s user memai-verify -- …`, `claude mcp get`, `claude mcp remove` | all succeeded, user config restored |
 | hooks load + fire | `claude --init-only --debug-file <f>` with generated `.claude/settings.json` | `Hook SessionStart:startup … provided additionalContext (896 chars)`, validated JSON |
 | MCP server seen by the session | same `--debug-file` log | `MCP server "memai": Successfully connected (transport: stdio)` |
+| project skill discovery | `memai skill install --agent all` then `claude --init-only --debug-file <f>` | `Loading skills from: … project=[<proj>\.claude\skills]`; `Loaded 2 unique skills (… project: 1 …)` |
 
 Not executed: an interactive/`-p` model session (no model calls were made), so the model *reading*
 the injected card is documented behavior, not observed.
 
 Adapter: [`adapters/claude-code/`](../adapters/claude-code/) — `mcp.json`, `settings-hooks.json`,
-`SKILL.md`, `README.md`. `memai init --agent claude --write-configs` generates local equivalents
-with absolute `node` paths (offline-safe); the adapter uses `npx` for published installs.
+`README.md` (the skill is **not** duplicated there; single source is [`skills/memai/`](../skills/memai/),
+installed by `memai skill install --agent claude` / `memai init`). `memai init --agent claude
+--write-configs` generates local equivalents with absolute `node` paths (offline-safe); the adapter
+uses `npx` for published installs.
 
 ---
 
@@ -274,6 +328,10 @@ Adapter: [`adapters/generic/`](../adapters/generic/) — `mcpServers.json`, `AGE
 - **Auto-approval / trust**: project-scope servers may require an interactive approval (Claude
   Code `.mcp.json`, OpenCode/codex configs, MCP clients' trust prompts). Non-interactive CI runs
   usually see them as pending; that is client policy, not a MemAi bug.
+- **Skill discovery in non-installed agents**: the `.agents`/`.claude` roots and the portable
+  frontmatter are documented from vendor docs; only Claude Code's discovery was executed here.
+  If an agent version ignores `.agents/skills`, use its native root (see optional roots in
+  [`install.md`](install.md#agent-skills-one-skill-every-agent)) — no change to the canonical file.
 
 ## Product identifiers (canonical)
 

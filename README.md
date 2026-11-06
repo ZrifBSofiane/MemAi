@@ -9,7 +9,7 @@ OpenCode, ZCode and DeepSeek Harness.
 
 [![CI](https://github.com/ZrifBSofiane/MemAi/actions/workflows/ci.yml/badge.svg)](https://github.com/ZrifBSofiane/MemAi/actions/workflows/ci.yml)
 
-> **v0.1.0 preview.** The measured numbers below are real runs on one machine
+> **v0.1.1 preview.** The measured numbers below are real runs on one machine
 > (Windows 11, Node 24.14); the compatibility matrix labels what was verified on
 > an installed agent versus documented from vendor docs. npm package:
 > `memai-cli` · CLI binary: `memai` · MCP binary: `memai-mcp` · store: `.memai/`
@@ -120,7 +120,8 @@ hundreds of tokens, not thousands.
 > form (the `memai-cli` name was free on npm at release time).
 
 ```bash
-# 1. Create the store, index the repo, write per-agent instructions + MCP snippets
+# 1. Create the store, index the repo, install the Agent Skills package,
+#    write per-agent instructions and MCP snippets
 npx -y memai-cli init --agent all
 
 # 2. Distil the repo locally (0 model tokens, no network)
@@ -178,6 +179,37 @@ MemAi never invents vendor config keys: each adapter states what it verified on 
 real install (and the version), what comes from vendor documentation, and what is
 unknown. The evidence matrix is [`docs/compatibility.md`](docs/compatibility.md).
 
+## Skills — one file, every agent
+
+[`skills/memai/SKILL.md`](skills/memai/SKILL.md) is a portable
+[Agent Skills](https://agentskills.io/specification) package. It teaches an agent *when* MemAi is
+worth using versus a plain file read — card → query → fault → diff, the `mem` MCP tool **and** the
+`memai` CLI fallback, the measured ~346-token / ~1.3 KB break-even, and the common pitfalls — and
+uses standard frontmatter only (`name`, `description`, `license`, `compatibility`, `metadata`), so
+strict clients accept it unchanged.
+
+`memai init` installs it by default into the two roots agents actually scan:
+
+| Install path | Agents that scan it |
+| --- | --- |
+| `.agents/skills/memai/SKILL.md` | Codex, OpenCode, ZCode, DSH, Cursor, Gemini CLI, generic SKILL.md hosts |
+| `.claude/skills/memai/SKILL.md` | Claude Code (its only project skill root — verified); OpenCode and Cursor also read it |
+
+```bash
+memai skill install                         # project scope, all agents (default)
+memai skill install --agent claude          # one agent alias
+memai skill install --global                # ~/.agents/skills + ~/.claude/skills
+memai skill install --link --force          # symlink/junction; replace a differing target
+memai skill list                            # installed / missing / differs
+memai skill status                          # same, with a summary
+```
+
+The installer is content-hash idempotent (re-runs report `unchanged`, no timestamp churn), keeps
+both copies byte-identical to the repo source, and never overwrites a different `memai` skill
+directory without `--force`. Verify with `memai skill list` and the agent's own skill catalog
+(Claude Code: `/skills`, then `/memai`). Per-agent roots and optional fallbacks:
+[`docs/install.md#agent-skills-one-skill-every-agent`](docs/install.md#agent-skills-one-skill-every-agent).
+
 ## Verified here vs documented only
 
 **Verified on this machine** (Windows 11, Node 24.14, SQLite 3.53):
@@ -197,7 +229,12 @@ unknown. The evidence matrix is [`docs/compatibility.md`](docs/compatibility.md)
   project settings hooks being loaded/fired by the CLI (no model calls made);
 - OpenCode v2.2.5: the `mcp.servers` config shape, `opencode mcp add`, and the
   `opencode mcp list` health check showing `✓ memai connected` (a v1-era
-  `mcp.memai` entry is ignored by v2).
+  `mcp.memai` entry is ignored by v2);
+- the `memai skill` installer: byte-identical copies in `.agents/skills` and
+  `.claude/skills`, content-hash idempotency, `--force`/`--link`/`--global`
+  behavior and the init integration (`node --test "test/*.test.mjs"`, 12 skill
+  tests), plus Claude Code 2.1.140 skill discovery
+  (`Loaded N unique skills (… project: 1 …)` after `memai skill install`).
 
 **Documented only** (not installed on the build machine, so not executed): the
 Codex config shape, the ZCode `mcp.servers`/process-hook shapes (taken from the
@@ -248,12 +285,13 @@ MemAi is honest about where paging loses. All of these are measured, not guessed
 ## Repository layout
 
 ```
-src/          store (SQLite/WAL/FTS5), extractor, pager, token estimator, core CLI
+src/          store (SQLite/WAL/FTS5), extractor, pager, token estimator, core CLI, skill installer
 mcp/          stdio MCP server, tool definitions, resources, SessionStart hook
-bin/          memai, memai-mcp executables (root resolution, init, hook, mcp)
+bin/          memai, memai-mcp executables (root resolution, init, skill, hook, mcp)
+skills/       portable Agent Skills package (skills/memai/SKILL.md), installed by init / memai skill
 adapters/     claude-code · codex · opencode · zcode · generic · dsh
 bench/        fixture generator, corpora/tasks, benchmark, selftest, RESULTS.md
-test/         unit + MCP protocol + init tests (node --test)
+test/         unit + MCP protocol + init/hook/skill tests (node --test)
 scripts/      mcp-probe.mjs (live handshake probe for CI/humans)
 examples/     minimal copy-ready configs
 tools/        token-estimator calibration against real session logs
@@ -275,7 +313,7 @@ PROTOCOL.md   normative page/version/delta/tool contract for implementers
 
 ```bash
 node bench/selftest.mjs           # 18/18 end-to-end checks
-node --test "test/*.test.mjs"     # unit + MCP protocol + init/hook tests
+node --test "test/*.test.mjs"     # unit + MCP protocol + init/hook/skill tests
 node --check mcp/server.mjs       # syntax
 node scripts/mcp-probe.mjs        # live JSON-RPC handshake + tool list
 node bench/bench.mjs              # regenerate bench/RESULTS.md

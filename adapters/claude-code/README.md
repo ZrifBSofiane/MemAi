@@ -6,11 +6,12 @@ Three independent pieces; use any subset.
 | --- | --- | --- | --- |
 | MCP server (project scope) | `mcp.json` | `.mcp.json` at the repo root | exposes one `mem` tool (`mcp__memai__mem`) |
 | SessionStart hook (optional) | `settings-hooks.json` | `.claude/settings.json` (project) or `~/.claude/settings.json` (user) | injects the ~200-token project card as `additionalContext` before the first prompt |
-| Skill (optional) | `SKILL.md` | `.claude/skills/memai/SKILL.md` | tells Claude when and how to page |
+| Skill (optional) | [`../../skills/memai/SKILL.md`](../../skills/memai/SKILL.md) | `.claude/skills/memai/SKILL.md` (installed for you) | tells Claude when and how to page |
 
 Fastest path: `npx -y memai-cli init --agent claude --write-configs` writes the store, a
-`CLAUDE.md` instruction block and merges the `memai` entry into `.mcp.json` (other keys preserved).
-Then merge `settings-hooks.json` into `.claude/settings.json` if you want the card pre-injected.
+`CLAUDE.md` instruction block, merges the `memai` entry into `.mcp.json`, and installs the Agent
+Skills package into `.claude/skills/memai/` (other keys preserved). Then merge
+`settings-hooks.json` into `.claude/settings.json` if you want the card pre-injected.
 
 ## MCP registration
 
@@ -89,9 +90,20 @@ Notes:
 
 ## Skill
 
-Copy `SKILL.md` to `.claude/skills/memai/SKILL.md`. Claude loads it when the task matches its
-description or when the user types `/memai`. Skills are loaded on demand, so the body costs
-nothing until used. Docs: https://code.claude.com/docs/en/skills
+The canonical skill is **not duplicated in this adapter**; the single source of truth is
+[`../../skills/memai/SKILL.md`](../../skills/memai/SKILL.md) (portable Agent Skills format).
+
+```sh
+memai skill install --agent claude     # project: .claude/skills/memai/SKILL.md
+memai skill install --agent claude --global   # user: ~/.claude/skills/memai/SKILL.md
+```
+
+`memai init --agent claude` installs it by default (`--no-skill` to skip), and re-runs are
+content-hash idempotent. Claude Code's project skill root is `.claude/skills/` (it does **not**
+scan `.agents/skills/`), which is why the installer writes both roots for `--agent all`.
+Claude loads the skill when the task matches its description or when the user types `/memai`;
+the body loads on demand, so it costs nothing until used.
+Docs: https://code.claude.com/docs/en/skills
 
 ## Instruction file
 
@@ -113,6 +125,9 @@ Claude Code reads `CLAUDE.md`/`.claude/CLAUDE.md` at every session start (user-l
 Verified on this machine with `claude` 2.1.140: project `.mcp.json` registration and health check,
 `claude mcp add -s project|user` + `claude mcp remove`, `${CLAUDE_PROJECT_DIR:-.}` expansion,
 `.claude/settings.json` hooks being loaded and fired by the CLI (sentinel files, `--init-only`),
-and the `memai hook card` payload. Not executed here: a full interactive session (no model calls
-were made), so in-session rendering of the injected card is documented behavior rather than
-observed.
+the `memai hook card` payload, and **project skill discovery** after `memai skill install --agent
+all` (`claude --init-only --debug-file` logged `Loading skills from: … project=[<proj>\.claude\skills]`
+and `Loaded N unique skills (… project: 1 …)`; a skill placed only in `.agents/skills` was not
+picked up, which is why the installer writes both roots). Not executed here: a full interactive
+session (no model calls were made), so in-session rendering of the injected card is documented
+behavior rather than observed.

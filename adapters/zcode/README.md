@@ -85,6 +85,14 @@ https://github.com/hyudryu/ZCode/blob/main/apps/zcode-cli/packages/adapters/src/
 
 `memai init --agent zcode` writes the guarded `<!-- memai:start -->` block into `AGENTS.md`.
 
+## Skill (Agent Skills)
+
+ZCode scans the project `.agents/skills` (depth-1: `<name>/SKILL.md`) and user `~/.agents/skills`
+in addition to its own `.zcode/skills` roots. The canonical
+[`../../skills/memai/SKILL.md`](../../skills/memai/SKILL.md) is installed by
+`memai skill install --agent zcode` (or `memai init`). The `.zcode/skills` path is an optional
+alias and is not written by default (see `docs/install.md`). Docs: https://zcode.z.ai/en/docs/skill
+
 ## Verification status
 
 **Documented from the ZCode CLI source and README; not verified on this machine** — `zcode` is not

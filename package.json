@@ -1,7 +1,7 @@
 {
   "name": "memai-cli",
-  "version": "0.1.0",
-  "description": "Paged memory for coding agents: a ~200-token project card plus a symbol manifest, demand-paged detail and Merkle deltas, shared by Claude Code, Codex, OpenCode, ZCode and DSH through one MCP server or one CLI.",
+  "version": "0.1.1",
+  "description": "Paged memory for coding agents: a ~200-token project card plus a symbol manifest, demand-paged detail and Merkle deltas, shared by Claude Code, Codex, OpenCode, ZCode and DSH through one MCP server, one CLI, or one portable Agent Skills package.",
   "type": "module",
   "license": "MIT",
   "author": "MemAi contributors",
@@ -25,6 +25,7 @@
     "bin/",
     "src/",
     "mcp/",
+    "skills/",
     "adapters/",
     "docs/",
     "examples/",
