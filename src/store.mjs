@@ -75,6 +75,8 @@ CREATE TABLE IF NOT EXISTS files (
   lang TEXT NOT NULL,
   mtime INTEGER NOT NULL,
   tokens INTEGER NOT NULL DEFAULT 0,
+  looks_esm INTEGER NOT NULL DEFAULT 0,
+  looks_cjs INTEGER NOT NULL DEFAULT 0,
   page_id TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS symbols (
@@ -136,20 +138,48 @@ CREATE TABLE IF NOT EXISTS index_meta (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS misses (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  query TEXT NOT NULL,
+  found_by TEXT,
+  hit_path TEXT,
+  agent TEXT NOT NULL DEFAULT 'anon',
+  ts INTEGER NOT NULL
+);
 CREATE VIRTUAL TABLE IF NOT EXISTS fts USING fts5(page_id UNINDEXED, kind UNINDEXED, body);
 `
 
 export class MemoryStore {
-  constructor({ dbPath, root }) {
+  /**
+   * `create:false` opens an existing store read-only: no directory is created,
+   * no schema is applied, and the connection refuses writes. A missing store is
+   * an error (`run memai init`), never a silent empty database.
+   */
+  constructor({ dbPath, root, create = true } = {}) {
     this.root = root ? path.resolve(root) : null
     this.dbPath = dbPath ? path.resolve(dbPath) : null
-    if (this.dbPath) fs.mkdirSync(path.dirname(this.dbPath), { recursive: true })
-    this.db = new DatabaseSync(this.dbPath || ':memory:')
-    this.db.exec('PRAGMA journal_mode = WAL;')
-    this.db.exec('PRAGMA synchronous = NORMAL;')
-    this.db.exec('PRAGMA foreign_keys = ON;')
-    this.db.exec(SCHEMA)
+    this.create = create
+    if (this.dbPath) {
+      if (!create && !fs.existsSync(this.dbPath)) throw new Error(`no MemAi store at ${this.dbPath}; run memai init`)
+      if (create) fs.mkdirSync(path.dirname(this.dbPath), { recursive: true })
+    }
+    this.db = create ? new DatabaseSync(this.dbPath || ':memory:') : new DatabaseSync(this.dbPath, { readOnly: true })
     this._stmts = new Map()
+    if (create) {
+      this.db.exec('PRAGMA journal_mode = WAL;')
+      this.db.exec('PRAGMA synchronous = NORMAL;')
+      this.db.exec('PRAGMA foreign_keys = ON;')
+      this.db.exec(SCHEMA)
+      this._migrate()
+    }
+  }
+
+  /** Additive column migrations for stores created by older versions (CREATE
+   * TABLE IF NOT EXISTS cannot add columns to an existing table). */
+  _migrate() {
+    const cols = new Set(this.all(`SELECT name FROM pragma_table_info('files')`).map((r) => r.name))
+    if (!cols.has('looks_esm')) this.exec('ALTER TABLE files ADD COLUMN looks_esm INTEGER NOT NULL DEFAULT 0')
+    if (!cols.has('looks_cjs')) this.exec('ALTER TABLE files ADD COLUMN looks_cjs INTEGER NOT NULL DEFAULT 0')
   }
 
   /** Prepared statement cache. */
@@ -238,13 +268,14 @@ export class MemoryStore {
 
   // ---------------------------------------------------------------- files ---
 
-  upsertFile({ path: p, contentHash, bytes, loc, lang, mtime, tokens = 0 }) {
+  upsertFile({ path: p, contentHash, bytes, loc, lang, mtime, tokens = 0, looksEsm = 0, looksCjs = 0 }) {
     const pageId = `file:${p}`
     this.run(
-      `INSERT INTO files(path, content_hash, bytes, loc, lang, mtime, tokens, page_id) VALUES (?,?,?,?,?,?,?,?)
+      `INSERT INTO files(path, content_hash, bytes, loc, lang, mtime, tokens, looks_esm, looks_cjs, page_id) VALUES (?,?,?,?,?,?,?,?,?,?)
        ON CONFLICT(path) DO UPDATE SET content_hash=excluded.content_hash, bytes=excluded.bytes,
-         loc=excluded.loc, lang=excluded.lang, mtime=excluded.mtime, tokens=excluded.tokens, page_id=excluded.page_id`,
-      p, contentHash, bytes, loc, lang, mtime, tokens, pageId
+         loc=excluded.loc, lang=excluded.lang, mtime=excluded.mtime, tokens=excluded.tokens,
+         looks_esm=excluded.looks_esm, looks_cjs=excluded.looks_cjs, page_id=excluded.page_id`,
+      p, contentHash, bytes, loc, lang, mtime, tokens, looksEsm ? 1 : 0, looksCjs ? 1 : 0, pageId
     )
     return pageId
   }
@@ -290,6 +321,20 @@ export class MemoryStore {
   }
   symbolsForPage(pageId) { return this.all('SELECT * FROM symbols WHERE page_id = ? ORDER BY line', pageId) }
   importsForFile(p) { return this.all('SELECT module FROM imports WHERE page_id = ? ORDER BY module', `file:${p}`).map((r) => r.module) }
+
+  // ------------------------------------------------------------- misses ---
+
+  /** Log a retrieval miss (index/query did not have it; something else did). */
+  recordMiss({ query, foundBy = null, hitPath = null, agent = 'anon' }) {
+    const r = this.run('INSERT INTO misses(query, found_by, hit_path, agent, ts) VALUES (?,?,?,?,?)', String(query), foundBy, hitPath, agent, Date.now())
+    return { id: Number(r.lastInsertRowid) }
+  }
+  missStats({ limit = 10 } = {}) {
+    const total = this.one('SELECT COUNT(*) AS n FROM misses').n
+    const top = this.all('SELECT query, COUNT(*) AS n, MAX(ts) AS last FROM misses GROUP BY query ORDER BY n DESC, last DESC LIMIT ?', limit)
+    const byTool = this.all("SELECT COALESCE(found_by, 'none') AS tool, COUNT(*) AS n FROM misses GROUP BY COALESCE(found_by, 'none') ORDER BY n DESC")
+    return { total, top, byTool }
+  }
 
   // ----------------------------------------------------------- fts search ---
 

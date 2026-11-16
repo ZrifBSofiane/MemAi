@@ -11,7 +11,7 @@ import { MemoryStore } from './store.mjs'
 import { MemoryPages, DEFAULTS } from './page.mjs'
 import { estTokens } from './tokens.mjs'
 
-export const VERSION = '0.1.1'
+export const VERSION = '0.2.0'
 
 const HELP = `MemAi CLI  (tokens are the currency; every response has a token count)
 
@@ -23,8 +23,12 @@ const HELP = `MemAi CLI  (tokens are the currency; every response has a token co
   map [--budget 3500]        symbol map for every file (the "don't read files" page)
   diff [--since HASH]        tiny delta from an old version (new-session resume)
   get <pageId> [--budget 1200]    page text (file:<path> | project.card | project.map | board:<t>)
-  query <terms> [--k 5] [--budget 400]   ranked page/symbol hits, snippets only
-  fault <sym | path#sym | path:line | path> [--budget 600]   demand-page one slice
+  query <terms> [--k 5] [--budget 400] [--rg]   ranked hits, snippets only;
+                                 --rg unions a ripgrep body sweep (catches what the index does not page)
+  fault <sym | path#sym | path:line | path> [--budget 600] [--deep]   one slice;
+                                 --deep appends callees + best-effort callers
+  miss "<query>" [--found-by T] [--path P] [--agent A]   log a retrieval miss (recall data)
+  miss --stats                    miss counts, top missed queries, per-tool breakdown
   note <topic> <body> [--agent A]        append to shared board (deduped)
   post <topic> <body> [--agent A]        broadcast message
   inbox <agent> [--since N] [--topic T]  messages since cursor (advances cursor)
@@ -33,6 +37,7 @@ const HELP = `MemAi CLI  (tokens are the currency; every response has a token co
   merge <pageId> [--agent A]             assemble pending edits -> new page version
 
 global flags: --root DIR  --db FILE  --text  --cpt N (chars/token)  --json (default)
+              --read-only (never create a store; error if missing)  --no-stale (skip disk staleness checks)
 
 Examples:
   node src/cli.mjs index
@@ -62,10 +67,12 @@ const num = (v, d) => (v === undefined || v === true ? d : Number(v))
 function open(flags) {
   const cwd = path.resolve(flags.root ? String(flags.root) : process.cwd())
   const dbPath = flags.db ? path.resolve(String(flags.db)) : path.join(cwd, '.memai', 'mem.db')
-  const store = new MemoryStore({ dbPath, root: cwd })
+  const readOnly = !!(flags['read-only'] || process.env.MEMAI_READONLY === '1')
+  const store = new MemoryStore({ dbPath, root: cwd, create: !readOnly })
   const root = store.getMeta('root') ? path.resolve(store.getMeta('root')) : cwd
   const pages = new MemoryPages({ store, root })
-  return { store, pages, root, dbPath }
+  pages.staleCheck = !(flags['no-stale'] || process.env.MEMAI_NO_STALE === '1')
+  return { store, pages, root, dbPath, readOnly }
 }
 
 export function createEnv(flags = {}) { return open(flags) }
@@ -84,7 +91,12 @@ export async function run(argv, { env = null } = {}) {
     store.close()
     return { ok: true, cmd, root: cwd, db: dbPath, text: `initialized ${dbPath}` }
   }
-  const ctx = env ?? open(flags)
+  let ctx
+  try {
+    ctx = env ?? open(flags)
+  } catch (err) {
+    return { ok: false, cmd, error: err?.message ?? String(err), tokens: 0 }
+  }
   const { store, pages, root, dbPath } = ctx
   try {
     switch (cmd) {
@@ -100,13 +112,22 @@ export async function run(argv, { env = null } = {}) {
       }
       case 'query': {
         const q = positional.slice(1).join(' ')
-        if (!q) return { ok: false, cmd, error: 'usage: query <terms>', tokens: 0 }
-        return { ok: true, cmd, ...pages.query(q, { k: num(flags.k, 5), budget: num(flags.budget, DEFAULTS.query) }) }
+        if (!q) return { ok: false, cmd, error: 'usage: query <terms> [--rg] [--k N]', tokens: 0 }
+        return { ok: true, cmd, ...pages.query(q, { k: num(flags.k, 5), budget: num(flags.budget, DEFAULTS.query), rg: !!flags.rg }) }
       }
       case 'fault': {
         const target = positional.slice(1).join(' ')
-        if (!target) return { ok: false, cmd, error: 'usage: fault <symbol|path#symbol|path:line|path>', tokens: 0 }
-        return { ok: true, cmd, ...pages.fault(target, { budget: num(flags.budget, DEFAULTS.fault) }) }
+        if (!target) return { ok: false, cmd, error: 'usage: fault <symbol|path#symbol|path:line|path> [--deep]', tokens: 0 }
+        return { ok: true, cmd, ...pages.fault(target, { budget: num(flags.budget, DEFAULTS.fault), deep: !!flags.deep }) }
+      }
+      case 'miss': {
+        if (flags.stats) return { ok: true, cmd, ...pages.missStats({ budget: num(flags.budget, 400) }) }
+        const q = positional.slice(1).join(' ')
+        if (!q) return { ok: false, cmd, error: 'usage: miss "<query>" [--found-by rg|grep|manual] [--path p] [--agent A] | miss --stats', tokens: 0 }
+        const agent = String(flags.agent ?? (process.env.MEMAI_AGENT ?? process.env.MEM_AGENT) ?? 'anon')
+        const foundBy = flags['found-by'] && flags['found-by'] !== true ? String(flags['found-by']) : null
+        const hitPath = flags.path && flags.path !== true ? String(flags.path) : null
+        return { ok: true, cmd, ...pages.recordMiss(q, { foundBy, hitPath, agent }) }
       }
       case 'note': case 'post': {
         const [topic, ...rest] = positional.slice(1)

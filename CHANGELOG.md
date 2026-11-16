@@ -4,6 +4,77 @@ All notable changes to this project are documented here. The format is loosely
 based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the
 project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] — 2026-11-16
+
+Staleness made visible, then made impossible; hybrid retrieval; deeper faults.
+
+### Added
+
+- **Serve-time staleness flags** — `query`, `get`, `card`, `map` and `fault`
+  now compare the store against disk on every serve and say so when they lie:
+  `stale` fields on hits/replies, `[STALE]` markers in text, a
+  `[STALE: N changed, M missing of K files — re-run index]` header on card/map.
+  File pages are hash-checked; the corpus-wide sweep is stat-only
+  (mtime+size). `--no-stale` / `MEMAI_NO_STALE=1` disables.
+- **`memai watch`** — a resident daemon that keeps the store fresh by watching
+  the working tree (`fs.watch` recursive). Single-file incremental distils
+  after an 800 ms debounce; bursts >50 paths (branch switches, builds) fall
+  back to one full index pass, which reuses unchanged files anyway. `.memai/**`
+  is always ignored (no feedback loop), per-file errors go to
+  `.memai/watch.log`, the pidfile lifecycle supports `--ensure` (lazily spawn
+  detached; safe in a SessionStart hook), `--stop` and `--status` (one JSON
+  line). The watcher never creates a store and exits when the project vanishes.
+- **`memai hook index`** — a PostToolUse hook (`Edit|Write|MultiEdit`): reads
+  the Claude-style `{tool_name, tool_input:{file_path}}` payload from stdin,
+  discovers the owning project by walking up from the file, and distils exactly
+  that file. Silent, exit 0 always — re-indexing can no longer be forgotten.
+  `memai init`'s generated ZCode config (`adapters/zcode/config.json`,
+  `.memai/configs/zcode-config.json`) wires both hooks.
+- **`query --rg`** — unions a ripgrep sweep over file bodies with the ranked
+  index hits (rg honors .gitignore, 5 s timeout, smart-case). Catches exactly
+  what the signature-only index cannot page; `kind: "text"` hits, and
+  degradation (rg missing / timeout) is a note, never an error. Exit code 2
+  with partial stdout still parses its matches (unreadable-file noise).
+- **`fault --deep`** — one-hop context appended to the slice within the same
+  budget: callees (identifiers of the slice that are known code symbols) and
+  best-effort callers (declaration lines mentioning the name). Structured
+  `deep: {callees, callers}` on the reply.
+- **`memai miss "<query>"` / `miss --stats`** — a recall log: record that a
+  lookup failed here and what found it instead (`--found-by rg|grep|manual
+  --path p`); stats give totals, top missed queries and the per-tool breakdown.
+  Retrieval misses stop being invisible.
+- **`--read-only` / `MEMAI_READONLY=1`** — the core CLI opens the store
+  read-only: no store creation on read paths (the old write-on-read hazard),
+  clean `no MemAi store at <path>; run memai init` error.
+- **`lineEnd` on fault replies** — symbol and line faults now report the exact
+  structured range (`path`, `line`, `lineEnd`; header `path:start-end`), so an
+  agent can read exactly the reported slice with a bounded file read.
+
+### Changed
+
+- **Incremental indexing internals** — the per-file loop of `indexCorpus` was
+  extracted into `distilFile`, the shared card/map/manifest tail into
+  `finalizeIndex` (fed by `buildRecordsFromStore`, no disk reads), and new
+  `indexFiles(store, {root, paths})` distils exactly the given paths without
+  listing the tree. Full-index output is byte-identical to 0.1.x (verified by
+  a version-hash oracle); `indexFiles` after mutations converges to the same
+  project version as a full re-index.
+- **MCP surface** — `op` gains `miss`; `query` accepts `rg`, `fault` accepts
+  `deep`; staleness flags flow through `page.mjs` to every surface for free.
+  The granular surface gains `mem_miss`.
+
+### Fixed
+
+- **The ESM/CJS card conventions never fired.** `readConfigInfo` read
+  `looksEsm`/`looksCjs` off store rows — fields that only ever existed on
+  in-memory records — so the line was dead since 0.1.0. Both flags are now
+  persisted on the `files` table at distil time (additive migration for
+  existing stores), reconstructed by `buildRecordsFromStore`, and
+  `readConfigInfo` consumes the records. Pure-ESM repos now get
+  `ES module imports (import/export)`, pure-CJS repos get
+  `CommonJS (require/module.exports)`; mixed and non-JS repos intentionally
+  stay silent. Card hashes change only for repos where the line appears.
+
 ## [0.1.1] — 2026-11-06
 
 Portable Agent Skills package + `memai skill` installer.

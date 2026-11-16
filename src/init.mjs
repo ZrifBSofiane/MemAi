@@ -251,11 +251,28 @@ export function configSnippets({ root }) {
       events: {
         SessionStart: [{
           matcher: 'startup|resume',
-          hooks: [{
+          hooks: [
+            {
+              type: 'process',
+              command: process.execPath,
+              args: [SELF_CLI, 'hook', 'card'],
+              timeoutMs: 20000,
+            },
+            { // lazy: starts the resident watcher only when a store already exists
+              type: 'process',
+              command: process.execPath,
+              args: [SELF_CLI, 'watch', '--ensure'],
+              timeoutMs: 10000,
+            },
+          ],
+        }],
+        PostToolUse: [{
+          matcher: 'Edit|Write|MultiEdit',
+          hooks: [{ // synchronous single-file re-index after every agent edit
             type: 'process',
             command: process.execPath,
-            args: [SELF_CLI, 'hook', 'card'],
-            timeoutMs: 20000,
+            args: [SELF_CLI, 'hook', 'index'],
+            timeoutMs: 15000,
           }],
         }],
       },

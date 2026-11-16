@@ -18,8 +18,9 @@ import fs from 'node:fs'
 import { run, render } from '../src/mem-cli.mjs'
 import { runInit } from '../src/init.mjs'
 import { runSkillCommand } from '../src/skill.mjs'
+import { runWatch } from '../src/watch.mjs'
 import { startServer } from '../mcp/server.mjs'
-import { hookCardPayload } from '../mcp/hook.mjs'
+import { hookCardPayload, hookIndexFile } from '../mcp/hook.mjs'
 import { PRODUCT, VERSION, resolveRoot, resolveDb } from '../mcp/paths.mjs'
 
 // The CLI reports the published package version (package.json is always shipped); the MCP
@@ -40,6 +41,11 @@ Usage:
   memai mcp [--root DIR]          Run the stdio MCP server (same as memai-mcp).
   memai hook card [--event E]     Print Claude Code SessionStart hook JSON with the
                                   project card as additionalContext (--text for raw text).
+  memai hook index                PostToolUse: index the file an editing tool just wrote
+                                  (Claude-style JSON payload on stdin; silent; never fails).
+  memai watch [--ensure|--stop|--status] [--debounce-ms N]
+                                  Resident daemon: keep the store fresh by watching the tree.
+                                  --ensure lazily starts it detached (safe in SessionStart).
   memai index [--max-files N] [--force]   Distil the repo into pages (local, 0 model tokens).
   memai status|card|map|diff|get|query|fault|note|post|inbox|agents|edit|merge ...
                                   Core paging commands (JSON on stdout, tokens on every reply).
@@ -87,6 +93,21 @@ function forwardArgs(argv, parsed) {
   return { rest, root, db, args: [...rest, `--root=${root}`, `--db=${db}`] }
 }
 
+/** Read stdin with a deadline (hook payloads); resolves '' when there is none. */
+function readStdin(timeoutMs = 5000) {
+  return new Promise((resolve) => {
+    if (process.stdin.isTTY) return resolve('')
+    const chunks = []
+    let done = false
+    const finish = () => { if (!done) { done = true; resolve(chunks.join('')) } }
+    const timer = setTimeout(finish, timeoutMs)
+    process.stdin.setEncoding('utf8')
+    process.stdin.on('data', (c) => chunks.push(c))
+    process.stdin.on('end', () => { clearTimeout(timer); finish() })
+    process.stdin.on('error', () => { clearTimeout(timer); finish() })
+  })
+}
+
 async function main() {
   const argv = process.argv.slice(2)
   const parsed = parseArgv(argv)
@@ -120,8 +141,25 @@ async function main() {
   }
 
   if (cmd === 'hook') {
+    if (sub === 'index') {
+      // PostToolUse: read the Claude-style payload from stdin, distil the edited
+      // file, stay silent and never fail the session.
+      try {
+        const raw = await readStdin(5000)
+        let payload = null
+        try { payload = raw.trim() ? JSON.parse(raw) : null } catch { payload = null } // malformed payload = no-op
+        await hookIndexFile({
+          payload,
+          root: parsed.flags.root === true ? null : parsed.flags.root,
+          db: parsed.flags.db === true ? null : parsed.flags.db,
+        })
+      } catch (err) {
+        process.stderr.write(`[memai hook] ${err?.message ?? err}\n`)
+      }
+      return 0
+    }
     if (sub !== 'card' && sub !== 'session-start') {
-      process.stderr.write('usage: memai hook card [--event SessionStart|SubagentStart] [--text] [--root DIR]\n')
+      process.stderr.write('usage: memai hook card [--event SessionStart|SubagentStart] [--text] [--root DIR] | memai hook index\n')
       return 2
     }
     const event = sub === 'session-start' ? 'SessionStart'
@@ -139,6 +177,13 @@ async function main() {
       process.stderr.write(`[memai hook] ${err?.message ?? err}\n`)
       return 0 // never break a session start
     }
+  }
+
+  if (cmd === 'watch') {
+    const watchArgs = argv.slice(argv.indexOf('watch') + 1)
+    const result = await runWatch(watchArgs)
+    if (result.text) process.stdout.write(result.text + '\n')
+    return result.ok ? 0 : 1
   }
 
   // Everything else is the core paging CLI, pinned to this project's store.
