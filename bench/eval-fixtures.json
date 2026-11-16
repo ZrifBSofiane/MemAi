@@ -1,0 +1,14 @@
+[
+  {"q": "sha1 hash", "expect": "src/store.mjs"},
+  {"q": "token budget estimator", "expect": "src/tokens.mjs"},
+  {"q": "clamp text truncation", "expect": "src/tokens.mjs"},
+  {"q": "index corpus distil", "expect": "src/extract.mjs"},
+  {"q": "distil one file", "expect": "src/extract.mjs"},
+  {"q": "sqlite store schema", "expect": "src/store.mjs"},
+  {"q": "merkle version manifest", "expect": "src/store.mjs"},
+  {"q": "fault symbol slice", "expect": "src/page.mjs"},
+  {"q": "watcher pidfile liveness", "expect": "src/watch.mjs"},
+  {"q": "hook index stdin payload", "expect": "mcp/hook.mjs"},
+  {"q": "resolve project root", "expect": "mcp/paths.mjs"},
+  {"q": "mcp tool schema ops", "expect": "mcp/tools.mjs"}
+]

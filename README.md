@@ -89,16 +89,26 @@ the closest tool in spirit, so we compared them on the **same copy of this
 repository** (75 files, 13.1K LOC), same machine, same day. Full method in
 [`bench/GRAPHIFY.md`](bench/GRAPHIFY.md).
 
-| | MemAi 0.2+ | graphify 0.9.34 |
-| --- | --- | --- |
-| Per-session instruction overhead | **716 tok** (one MCP tool schema) | ~14,100 tok (SKILL.md + query reference, loaded per invocation) |
-| Zero-token build coverage | **75 files** (code + docs + config) | 48 code files only — docs/papers/images need its LLM extraction (real tokens) |
-| Q: "how does the watch daemon debounce events?" | **692 tok total** (query 93 + fault 599) — full function body, answer complete | 1,652 tok — truncated node/edge list, **no code**; a file read is still needed (+1–2K tok) |
-| Q: "what calls indexFiles?" | 121 tok, callers found | miss — *"No affected nodes found"* (dynamic-import edge not captured) |
+Re-run on 0.3.0 across **six questions** spanning task types (full method,
+per-question numbers and honest losses in
+[`bench/BENCHMARK-0.3.0.md`](bench/BENCHMARK-0.3.0.md); 0.2.1 record in
+[`bench/GRAPHIFY.md`](bench/GRAPHIFY.md)):
 
-- **~20× less instruction overhead per session** and **~2.4× fewer tokens per
-  answered question**, with the answer being the code itself rather than an
+| | MemAi 0.3+ | graphify 0.9.34 |
+| --- | --- | --- |
+| Per-session instruction overhead | **891 tok** (one MCP tool schema) | ~14,100 tok (SKILL.md + query reference, loaded per invocation) |
+| Zero-token build coverage | **all 77 files** (code + docs + config) | 50 code files only — docs/papers/images need its LLM extraction (real tokens) |
+| Totals across 6 questions | **1,671 tok — every answer complete** | 3,739 tok — 2 outright misses, 1 truncated, bodies still need file reads |
+
+- **~2.2× fewer tokens across the six questions** (~11× less per-session
+  instruction overhead), with the answer being the code itself rather than an
   address that still needs a read.
+- graphify won one leg fairly: shortest-path between imports (`path`, 30 tok)
+  — MemAi's `graph` returns all chains (256 tok). A `--shortest` mode is the
+  noted follow-up.
+- Self-measured retrieval baseline (`memai eval`, shipped in 0.3.0): recall@5
+  **50%** / MRR 0.32 on 12 fixtures, both modes — published as the number
+  future retrieval work has to move.
 - Where graphify genuinely wins: architecture-wide discovery (community
   detection, god nodes), mixed corpora (papers, images, video), cross-repo
   merged graphs, and human-facing HTML/GraphRAG exports. MemAi does none of

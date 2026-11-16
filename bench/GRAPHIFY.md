@@ -1,5 +1,10 @@
 # Head-to-head: MemAi vs graphify (2026-11-17)
 
+> **0.3.0 re-run:** this comparison was repeated against MemAi 0.3.0 with six
+> questions, dependency-navigation legs, an `eval` baseline and the resume
+> economy — see [`BENCHMARK-0.3.0.md`](BENCHMARK-0.3.0.md). The numbers below
+> are the original 0.2.1 record, kept for trend comparison.
+
 Measured comparison of token economy for the agent codebase-navigation
 workload. **One repo, one machine, two questions** — a navigation benchmark,
 not a feature-parity claim.
