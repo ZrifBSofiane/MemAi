@@ -4,6 +4,18 @@ All notable changes to this project are documented here. The format is loosely
 based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the
 project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.1] — 2026-11-17
+
+### Fixed
+
+- **Fault pages could collapse to a header-only stub.** For symbols whose clamped body
+  could not shrink by less than one line (~5-15 tokens of granularity), the budget
+  loop stalled at ~602 tokens for four iterations and fell through to the
+  header-only fallback — serving 28 of 600 tokens for dense 80+ line functions.
+  The loop now overshoots proportionally (1.2x the excess, bounded by line
+  granularity) and, on exhaustion, serves the closest attempt: a few percent
+  over budget beats losing the entire body.
+
 ## [0.2.0] — 2026-11-16
 
 Staleness made visible, then made impossible; hybrid retrieval; deeper faults.

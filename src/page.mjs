@@ -29,16 +29,24 @@ export const PAGE_KINDS = ['project.card', 'project.map', 'file:<path>', 'board:
 
 const fitWithHeader = (bodyText, budget, makeHeader) => {
   // Reserve header tokens by iterating: clamp body, build header, check total.
+  // clampText cuts on line boundaries (~5-15 tokens of granularity), so the
+  // decrement must overshoot proportionally — a `total - budget` step smaller
+  // than one line stalls the loop and would fall through to a header-only page.
   let b = Math.max(0, budget)
-  for (let i = 0; i < 4; i++) {
+  let last = null
+  for (let i = 0; i < 6; i++) {
     const body = clampText(bodyText, b)
     const header = makeHeader(body)
     const text = header + '\n' + body.text
     const total = estTokens(text)
-    if (total <= budget) return { text, tokens: total, truncated: body.truncated, omittedLines: body.omittedLines, header }
-    b -= Math.max(1, total - budget)
+    last = { text, tokens: total, truncated: body.truncated, omittedLines: body.omittedLines, header }
+    if (total <= budget) return last
+    b -= Math.max(1, Math.ceil((total - budget) * 1.2))
     if (b < 0) b = 0
   }
+  // Loop exhausted (line granularity): serve the closest attempt — a few
+  // percent over budget beats dropping the entire body for a header-only page.
+  if (last) return last
   const body = clampText(bodyText, 0)
   const header = makeHeader(body)
   return { text: header, tokens: estTokens(header), truncated: true, omittedLines: body.omittedLines, header }
