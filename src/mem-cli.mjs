@@ -33,6 +33,7 @@ const HELP = `MemAi CLI  (tokens are the currency; every response has a token co
   merge <pageId> [--agent A]             assemble pending edits -> new page version
 
 global flags: --root DIR  --db FILE  --text  --cpt N (chars/token)  --json (default)
+              --read-only (never create a store; error if missing)  --no-stale (skip disk staleness checks)
 
 Examples:
   node src/cli.mjs index
@@ -62,10 +63,12 @@ const num = (v, d) => (v === undefined || v === true ? d : Number(v))
 function open(flags) {
   const cwd = path.resolve(flags.root ? String(flags.root) : process.cwd())
   const dbPath = flags.db ? path.resolve(String(flags.db)) : path.join(cwd, '.memai', 'mem.db')
-  const store = new MemoryStore({ dbPath, root: cwd })
+  const readOnly = !!(flags['read-only'] || process.env.MEMAI_READONLY === '1')
+  const store = new MemoryStore({ dbPath, root: cwd, create: !readOnly })
   const root = store.getMeta('root') ? path.resolve(store.getMeta('root')) : cwd
   const pages = new MemoryPages({ store, root })
-  return { store, pages, root, dbPath }
+  pages.staleCheck = !(flags['no-stale'] || process.env.MEMAI_NO_STALE === '1')
+  return { store, pages, root, dbPath, readOnly }
 }
 
 export function createEnv(flags = {}) { return open(flags) }
@@ -84,7 +87,12 @@ export async function run(argv, { env = null } = {}) {
     store.close()
     return { ok: true, cmd, root: cwd, db: dbPath, text: `initialized ${dbPath}` }
   }
-  const ctx = env ?? open(flags)
+  let ctx
+  try {
+    ctx = env ?? open(flags)
+  } catch (err) {
+    return { ok: false, cmd, error: err?.message ?? String(err), tokens: 0 }
+  }
   const { store, pages, root, dbPath } = ctx
   try {
     switch (cmd) {

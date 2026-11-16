@@ -140,15 +140,26 @@ CREATE VIRTUAL TABLE IF NOT EXISTS fts USING fts5(page_id UNINDEXED, kind UNINDE
 `
 
 export class MemoryStore {
-  constructor({ dbPath, root }) {
+  /**
+   * `create:false` opens an existing store read-only: no directory is created,
+   * no schema is applied, and the connection refuses writes. A missing store is
+   * an error (`run memai init`), never a silent empty database.
+   */
+  constructor({ dbPath, root, create = true } = {}) {
     this.root = root ? path.resolve(root) : null
     this.dbPath = dbPath ? path.resolve(dbPath) : null
-    if (this.dbPath) fs.mkdirSync(path.dirname(this.dbPath), { recursive: true })
-    this.db = new DatabaseSync(this.dbPath || ':memory:')
-    this.db.exec('PRAGMA journal_mode = WAL;')
-    this.db.exec('PRAGMA synchronous = NORMAL;')
-    this.db.exec('PRAGMA foreign_keys = ON;')
-    this.db.exec(SCHEMA)
+    this.create = create
+    if (this.dbPath) {
+      if (!create && !fs.existsSync(this.dbPath)) throw new Error(`no MemAi store at ${this.dbPath}; run memai init`)
+      if (create) fs.mkdirSync(path.dirname(this.dbPath), { recursive: true })
+    }
+    this.db = create ? new DatabaseSync(this.dbPath || ':memory:') : new DatabaseSync(this.dbPath, { readOnly: true })
+    if (create) {
+      this.db.exec('PRAGMA journal_mode = WAL;')
+      this.db.exec('PRAGMA synchronous = NORMAL;')
+      this.db.exec('PRAGMA foreign_keys = ON;')
+      this.db.exec(SCHEMA)
+    }
     this._stmts = new Map()
   }
 
