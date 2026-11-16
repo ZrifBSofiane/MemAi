@@ -23,7 +23,7 @@ import { estTokens, clampText } from './tokens.mjs'
 import { EXTRACTOR_VERSION, KEYWORDS, langOf, isTestPath } from './extract.mjs'
 
 export const DEFAULTS = {
-  card: 700, map: 3500, get: 1200, fault: 600, query: 400, diff: 600,
+  card: 700, map: 3500, get: 1200, fault: 600, query: 400, diff: 600, graph: 500, pack: 1500,
 }
 export const PAGE_KINDS = ['project.card', 'project.map', 'file:<path>', 'board:<topic>']
 
@@ -162,7 +162,11 @@ export class MemoryPages {
    * Tiny textual delta between the current project version and `since`.
    * Returns changed/added/removed pages with per-file symbol churn, never bodies.
    */
-  diff({ since = null, budget = DEFAULTS.diff } = {}) {
+  diff({ since = null, budget = DEFAULTS.diff, last = false, agent = 'anon' } = {}) {
+    if (!since && last) {
+      since = this.store.getMeta(`checkpoint:${agent}`) ?? null
+      if (!since) return { ok: false, error: `no checkpoint for agent "${agent}" — run \`memai checkpoint [--agent ${agent}]\` at the end of a session`, tokens: 0 }
+    }
     const latest = this.store.latestVersion()
     if (!latest) return { ok: false, error: 'no versions recorded; run index first', tokens: 0 }
     const cur = this.store.getVersion(latest.version_hash)
@@ -228,6 +232,14 @@ export class MemoryPages {
     }
   }
 
+  /** Record the current project version for an agent so a later `diff --last` can resume. */
+  checkpoint(agent = 'anon') {
+    const latest = this.store.latestVersion()
+    if (!latest) return { ok: false, error: 'no versions recorded; run index first', tokens: 0 }
+    this.store.setMeta(`checkpoint:${agent}`, latest.version_hash)
+    return { ok: true, agent, version: latest.version_hash, tokens: 8, text: `checkpoint ${agent} → ${latest.version_hash.slice(0, 12)}` }
+  }
+
   // ---------------------------------------------------------------- fault ---
 
   /** Demand-page one slice: symbol name, path#symbol, path:line, or path page. `--deep` adds one-hop context. */
@@ -283,6 +295,16 @@ export class MemoryPages {
       if (own(r) || !isCodeSym(r) || callers.some((c) => c.path === r.path && c.line === r.line)) continue
       callers.push(r)
       if (callers.length >= 5) break
+    }
+    // Body-level call sites (dynamic imports, method-body calls) never appear
+    // in declaration signatures — a ripgrep sweep fills the remaining slots.
+    if (callers.length < 5 && this.staleCheck !== false) {
+      const extra = this._rgSearch(best.name, { cap: 5 - callers.length })
+      for (const h of extra.hits) {
+        if (h.path === best.path || callers.some((c) => c.path === h.path && c.line === h.line)) continue
+        callers.push({ name: null, kind: 'call-site', path: h.path, line: h.line, signature: h.snippet.slice(0, 120) })
+        if (callers.length >= 5) break
+      }
     }
     return { callees, callers }
   }
@@ -452,6 +474,127 @@ export class MemoryPages {
     return { ok: true, query: q, hits: top, count: top.length, rgNote, tokens: r.tokens, budget, truncated: r.truncated, text: r.text }
   }
 
+  // ---------------------------------------------------------------- graph ---
+
+  /**
+   * Resolve a relative import specifier from an importer file to an indexed
+   * project path. Returns null for bare/external specifiers (node:fs, react…).
+   */
+  _resolveSpec(importerRel, spec, fileSet) {
+    if (!/^\.{1,2}\//.test(spec)) return null
+    const base = path.posix.normalize(path.posix.dirname(importerRel.split('\\').join('/')) + '/' + spec.split('\\').join('/'))
+    const exts = ['', '.js', '.mjs', '.cjs', '.ts', '.tsx', '.jsx', '.mts', '.cts', '/index.js', '/index.mjs', '/index.ts', '/index.tsx']
+    for (const e of exts) if (fileSet.has(base + e)) return base + e
+    return null
+  }
+
+  /**
+   * Module dependency navigation from the stored `imports` table — data the
+   * index already collects but 0.2.x never exposed.
+   * `graph <path|symbol>` reports what a file imports, what imports it
+   * (reverse edges), transitive importer chains to `--depth`, and cycles.
+   */
+  graph(target, { depth = 1, budget = DEFAULTS.graph } = {}) {
+    target = normPath(target)
+    if (!target) return { ok: false, error: 'empty graph target', tokens: 0 }
+    if (target.startsWith('file:')) target = target.slice(5)
+    let sym = null
+    let file = this._findFile(target)
+    if (!file) {
+      const cands = this.store.symbolSearch(target, { limit: 1 })
+      if (!cands.length) return { ok: false, error: `no file or symbol: ${target}`, tokens: 0 }
+      const best = cands[0]
+      file = this.store.getFile(best.path)
+      sym = { name: best.name, line: best.line }
+    }
+    if (!file) return { ok: false, error: `no file: ${target}`, tokens: 0 }
+    const rel = file.path
+
+    const fileSet = new Set(this.store.allFiles().map((r) => r.path))
+    const rows = this.store.all('SELECT path, module FROM imports')
+    const forward = []
+    const reverse = [] // [importer, spec]
+    for (const r of rows) {
+      const resolved = this._resolveSpec(r.path, r.module, fileSet)
+      if (resolved === rel) reverse.push({ path: r.path, spec: r.module })
+      if (r.path === rel) forward.push({ path: resolved, spec: r.module, external: resolved === null })
+    }
+
+    // Transitive reverse chains (DFS with cycle detection).
+    const byImporter = new Map()
+    for (const r of rows) {
+      const resolved = this._resolveSpec(r.path, r.module, fileSet)
+      if (resolved) { if (!byImporter.has(resolved)) byImporter.set(resolved, []); byImporter.get(resolved).push(r.path) }
+    }
+    const chain = []
+    const cycles = []
+    const walk = (node, trail) => {
+      if (trail.length >= depth + 1 || chain.length >= 12) return
+      for (const next of byImporter.get(node) ?? []) {
+        if (trail.includes(next)) { cycles.push([...trail, next]); continue }
+        chain.push([...trail, next])
+        walk(next, [...trail, next])
+      }
+    }
+    walk(rel, [rel])
+
+    const lines = [`# graph ${rel}${sym ? ` (${sym.name} @${sym.line})` : ''}`]
+    lines.push(`importers (${reverse.length}):`)
+    for (const r of reverse.slice(0, 10)) lines.push(`  <-- ${r.path}  [${r.spec}]`)
+    if (reverse.length > 10) lines.push(`  … (+${reverse.length - 10} more)`)
+    const internal = forward.filter((f) => !f.external)
+    const external = forward.filter((f) => f.external)
+    lines.push(`imports (${internal.length} internal, ${external.length} external):`)
+    for (const r of internal.slice(0, 10)) lines.push(`  --> ${r.path}  [${r.spec}]`)
+    for (const r of external.slice(0, 4)) lines.push(`  --> (external) ${r.spec}`)
+    if (chain.length) {
+      lines.push(`reverse chains (depth ${depth}):`)
+      for (const c of chain.slice(0, 8)) lines.push(`  ${c.join(' <-- ')}`)
+    }
+    for (const c of cycles.slice(0, 2)) lines.push(`cycle: ${c.join(' <-- ')}`)
+    if (!reverse.length && !internal.length && !external.length) lines.push('(no import edges recorded — file has no imports and no importers)')
+    const r = clampText(lines.join('\n'), budget)
+    return {
+      ok: true, target, resolved: rel, symbol: sym?.name ?? null,
+      importers: reverse, imported: forward, chain, cycles, tokens: r.tokens, budget, truncated: r.truncated, text: r.text,
+    }
+  }
+
+  // ----------------------------------------------------------------- eval ---
+
+  /**
+   * Fixture-based retrieval evaluation. Fixtures are `[{q, expect}]` where
+   * `expect` is a project path (suffix match passes). Measures recall@k and
+   * MRR per mode (`index` = FTS/symbols only, `hybrid` = unioned ripgrep).
+   */
+  evaluate(fixtures, { k = 5, modes = ['index', 'hybrid'] } = {}) {
+    if (!Array.isArray(fixtures) || !fixtures.length) return { ok: false, error: 'no fixtures', tokens: 0 }
+    const norm = (p) => String(p ?? '').replace(/\\/g, '/').replace(/^\.\//, '')
+    const results = {}
+    for (const mode of modes) {
+      let hits = 0
+      let mrrSum = 0
+      const rows = []
+      for (const fx of fixtures) {
+        const r = this.query(String(fx.q), { k, rg: mode === 'hybrid' })
+        const expect = norm(fx.expect)
+        const rank = r.hits.findIndex((h) => {
+          const hp = norm(h.path)
+          return hp === expect || hp.endsWith('/' + expect)
+        })
+        if (rank >= 0) { hits++; mrrSum += 1 / (rank + 1) }
+        rows.push({ q: String(fx.q), expect, hit: rank >= 0, rank: rank >= 0 ? rank + 1 : null })
+      }
+      results[mode] = { recallAtK: hits / fixtures.length, mrr: mrrSum / fixtures.length, hits, total: fixtures.length, rows }
+    }
+    const lines = [`# eval — ${fixtures.length} fixtures, k=${k}`]
+    for (const [mode, r] of Object.entries(results)) lines.push(`${mode}: recall@${k}=${Math.round(r.recallAtK * 100)}%  mrr=${r.mrr.toFixed(2)}  (${r.hits}/${r.total})`)
+    const first = results[Object.keys(results)[0]]
+    for (const row of first?.rows ?? []) if (!row.hit) lines.push(`miss: "${row.q}" → expected ${row.expect}`)
+    const text = lines.join('\n')
+    return { ok: true, k, results, tokens: estTokens(text), text }
+  }
+
   // ---------------------------------------------------------------- merge ---
 
   /**
@@ -528,6 +671,37 @@ export class MemoryPages {
     return { ok: true, total: s.total, top: s.top, byTool: s.byTool, tokens: r.tokens, budget, truncated: r.truncated, text: r.text }
   }
 
+  // ----------------------------------------------------------------- pack ---
+
+  /**
+   * Assemble a budgeted handoff bundle: project card + a board topic's recent
+   * notes + optional fault slices, ending with the version to `diff --since`
+  * on resume. Read-only assembly — nothing is written to the board.
+   */
+  pack(topic = 'handoff', { budget = DEFAULTS.pack, faults = [], card = true, cardBudget = 500, agent = 'anon' } = {}) {
+    const latest = this.store.latestVersion()
+    const lines = [`# handoff pack — ${topic}`]
+    if (card !== false) {
+      const c = this.card({ budget: cardBudget })
+      if (c.ok) lines.push(c.text)
+    }
+    const messages = this.store.all('SELECT seq, agent, kind, body FROM messages WHERE topic = ? ORDER BY seq DESC LIMIT 8', topic).reverse()
+    if (messages.length) {
+      lines.push(`# notes (${messages.length})`)
+      for (const m of messages) lines.push(`[${m.seq}] <${m.agent}> ${m.kind}: ${m.body.replace(/\s+/g, ' ').slice(0, 180)}`)
+    }
+    for (const raw of Array.isArray(faults) ? faults : []) {
+      for (const name of String(raw).split(',')) {
+        const f = this.fault(name.trim(), { budget: 250 })
+        if (f.ok) lines.push(`# fault ${f.symbol} → ${f.path}:${f.line}-${f.lineEnd}\n${f.text}`)
+      }
+    }
+    if (latest) lines.push(`# resume with: diff --since ${latest.version_hash.slice(0, 12)} (or \`diff --last --agent ${agent}\` after \`checkpoint --agent ${agent}\`)`)
+    else lines.push('# (no versions recorded yet)')
+    const r = clampText(lines.join('\n'), budget)
+    return { ok: true, topic, version: latest?.version_hash ?? null, notes: messages.length, tokens: r.tokens, budget, truncated: r.truncated, text: r.text }
+  }
+
   // ----------------------------------------------------------------- board ---
 
   post(topic, body, { agent = 'anon', kind = 'note', refs = null } = {}) {
@@ -575,6 +749,10 @@ export class MemoryPages {
     const kinds = {}
     for (const p of this.store.listPages()) kinds[p.kind.split(':')[0]] = (kinds[p.kind.split(':')[0]] || 0) + 1
     const latest = this.store.latestVersion()
+    const scan = this._staleScan()
+    const freshness = scan
+      ? (scan.changed || scan.missing ? `${scan.changed} changed, ${scan.missing} missing of ${scan.checked} files — re-run index` : `fresh (${scan.checked} files)`)
+      : 'unknown (--no-stale)'
     const text = [
       '# MemAi status',
       `root: ${this.root}`,
@@ -582,6 +760,7 @@ export class MemoryPages {
       `corpus: ${s.files} files, ${(s.bytes / 1024).toFixed(1)}KB, ${s.loc} LOC, ~${s.tokens} tokens if read fully`,
       `pages: ${pages} (${Object.entries(kinds).map(([k, n]) => `${k}:${n}`).join(' ')})`,
       `versions: ${this.store.one('SELECT COUNT(*) AS n FROM versions').n}  latest=${latest?.version_hash?.slice(0, 12) ?? '-'}`,
+      `freshness: ${freshness}`,
       `card=${meta.card_tokens ?? '?'}tok  map=${meta.map_tokens ?? '?'}tok  index=${meta.last_index_ms ?? '?'}ms`,
       `board: ${this.store.messageCount()} messages, ${this.store.editCount()} unmerged edits, ${this.store.allAgents().length} agents`,
       `extractor: ${meta.extractor_version ?? '-'}  indexed_files: ${meta.last_index_files ?? '-'}  last_index: ${meta.last_index_ms ?? '-'}ms`,
@@ -589,6 +768,7 @@ export class MemoryPages {
     return {
       ok: true, root: this.root, db: this.store.dbPath, dbBytes: this.store.dbBytes(),
       corpus: { files: s.files, bytes: s.bytes, loc: s.loc, tokens: s.tokens },
+      stale: scan ? { changed: scan.changed, missing: scan.missing, checked: scan.checked } : null,
       pages, kinds, version: latest?.version_hash ?? null, versions: this.store.one('SELECT COUNT(*) AS n FROM versions').n,
       messages: this.store.messageCount(), edits: this.store.editCount(), agents: this.store.allAgents().length,
       tokens: estTokens(text), text,

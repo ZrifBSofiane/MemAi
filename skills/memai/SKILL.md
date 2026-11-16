@@ -23,6 +23,15 @@ the alternative is reading whole files into context.
 - You need one function, method or line range: `fault` returns just that slice.
 - You want a file's surface without its body: `get file:<path>` returns signatures.
 - You are resuming after edits or in a new session: `diff --since <version>` lists what changed.
+  At session end run `checkpoint` (CLI) so the next session can use `diff --last` — no hash hunting.
+- You need dependency answers ("what breaks if this changes", "who uses this module"): use
+  `{"op":"graph","target":"<path|symbol>","depth":2}` (CLI `memai graph`) — importers, imports,
+  transitive chains and cycles from the stored imports table. No body reads.
+- You are handing work to the next agent: assemble one budgeted page with
+  `{"op":"pack","topic":"handoff"}` (CLI `memai pack`) — card + board notes + resume version.
+  Optionally `--fault "sym1,sym2"` for small slices of hot code.
+- You want to know whether the index can be trusted: `memai eval` over `.memai/eval.json`
+  fixtures (recall@k + MRR per mode) and `miss --stats` for organic misses.
 - Other agents are working in the same repo: `note`, `post`, `inbox` share page ids and short
   state without pasting file bodies.
 
@@ -59,7 +68,7 @@ not, use the tool. Do not mix two stores.
 ## Budget discipline
 
 - Every reply starts with a token count and is clamped to a budget.
-- Defaults are tuned: card 700, map 3500, get 1200, fault 600, query 400, diff 600, inbox 900.
+- Defaults are tuned: card 700, map 3500, get 1200, fault 600, query 400, diff 600, inbox 900, graph 500, pack 1500.
 - Lower a budget (`"budget": 300`, `--budget 300`) for a cheap peek; raise it only when the
   previous page was truncated and the rest is genuinely needed.
 - Prefer one larger `fault` over many tiny `query` calls. Stop when the question is answered.

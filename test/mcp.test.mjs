@@ -85,7 +85,7 @@ test('tools/list default surface is exactly one tight `mem` tool', async () => {
     assert.equal(tools[0].name, 'mem')
     assert.equal(tools[0].inputSchema.type, 'object')
     assert.deepEqual(tools[0].inputSchema.properties.op.enum,
-      ['card', 'map', 'query', 'fault', 'get', 'diff', 'status', 'index', 'note', 'post', 'inbox', 'miss'])
+      ['card', 'map', 'query', 'fault', 'get', 'diff', 'status', 'index', 'note', 'post', 'inbox', 'miss', 'graph', 'pack'])
     assert.deepEqual(tools[0].inputSchema.required, ['op'])
     assert.equal(tools[0].inputSchema.additionalProperties, false)
     assert.ok(tools[0].description.length > 80)
@@ -221,13 +221,13 @@ test('stdout stays protocol-clean through a full session and shutdown exits 0', 
   await assertProtocolClean(client, assert)
 })
 
-test('MEMAI_GRANULAR_TOOLS=1 exposes 12 granular tools and still serves data', async () => {
+test('MEMAI_GRANULAR_TOOLS=1 exposes 14 granular tools and still serves data', async () => {
   await withClient(async (client) => {
     await client.initialize()
     const res = await client.rpc('tools/list', {})
     const names = res.result.tools.map((t) => t.name)
-    assert.equal(names.length, 12)
-    for (const name of ['mem_card', 'mem_map', 'mem_query', 'mem_fault', 'mem_get', 'mem_diff', 'mem_status', 'mem_index', 'mem_note', 'mem_post', 'mem_inbox', 'mem_miss']) {
+    assert.equal(names.length, 14)
+    for (const name of ['mem_card', 'mem_map', 'mem_query', 'mem_fault', 'mem_get', 'mem_diff', 'mem_status', 'mem_index', 'mem_note', 'mem_post', 'mem_inbox', 'mem_miss', 'mem_graph', 'mem_pack']) {
       assert.ok(names.includes(name), `missing granular tool ${name}`)
     }
     const card = await client.rpc('tools/call', { name: 'mem_card', arguments: {} })

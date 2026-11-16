@@ -81,6 +81,70 @@ reads are already cheap) to 5.50× (a locate task on the real 288-file corpus).
 > dollar figure doubles, while all token ratios are price-independent. This is a
 > controlled benchmark, not a production A/B.
 
+## Head-to-head vs graphify (measured)
+
+graphify (v0.9.34) builds a knowledge graph over a corpus (AST for code, LLM
+extraction for docs) with community detection and budgeted graph queries. It is
+the closest tool in spirit, so we compared them on the **same copy of this
+repository** (75 files, 13.1K LOC), same machine, same day. Full method in
+[`bench/GRAPHIFY.md`](bench/GRAPHIFY.md).
+
+| | MemAi 0.2+ | graphify 0.9.34 |
+| --- | --- | --- |
+| Per-session instruction overhead | **716 tok** (one MCP tool schema) | ~14,100 tok (SKILL.md + query reference, loaded per invocation) |
+| Zero-token build coverage | **75 files** (code + docs + config) | 48 code files only — docs/papers/images need its LLM extraction (real tokens) |
+| Q: "how does the watch daemon debounce events?" | **692 tok total** (query 93 + fault 599) — full function body, answer complete | 1,652 tok — truncated node/edge list, **no code**; a file read is still needed (+1–2K tok) |
+| Q: "what calls indexFiles?" | 121 tok, callers found | miss — *"No affected nodes found"* (dynamic-import edge not captured) |
+
+- **~20× less instruction overhead per session** and **~2.4× fewer tokens per
+  answered question**, with the answer being the code itself rather than an
+  address that still needs a read.
+- Where graphify genuinely wins: architecture-wide discovery (community
+  detection, god nodes), mixed corpora (papers, images, video), cross-repo
+  merged graphs, and human-facing HTML/GraphRAG exports. MemAi does none of
+  that; graphify does not demand-page bodies. They are complements.
+
+> **Method note.** Token counts measured with the same `chars / 3.966`
+> estimator on both sides; graphify queried through its CLI at its default
+> 2,000-token budget. Two questions, one repo, one machine — a navigation
+> benchmark, **not** a feature-parity claim.
+
+## Freshness automation (0.2+)
+
+An index is only useful while it is fresh, and 0.2 made freshness mechanical
+instead of memorized:
+
+```bash
+npx -y memai-cli watch --ensure   # resident daemon, lazily started (SessionStart)
+npx -y memai-cli status           # now reports "freshness: fresh (75 files)"
+```
+
+- Every serving command self-checks against disk: replies carry `stale` and
+  text carries `[STALE]` markers, so a stale page is a *known* stale page.
+- A PostToolUse hook (`memai hook index`) distils each file an agent edits;
+  `init` writes the hooks into ZCode/Claude Code configs. When the daemon is
+  alive the hook defers to it; when it is not, the hook indexes directly.
+- `memai watch` debounces events (800 ms), distils exactly the changed files,
+  falls back to one full pass on >50-path bursts, holds a circuit breaker
+  against pathological writers, and never watches `.memai/` itself.
+
+## Navigate, resume, evaluate (0.3+)
+
+```bash
+memai graph src/page.mjs --depth 2  # importers, imports, reverse chains, cycles
+memai graph resolveDb               # symbol targets resolve to their file
+memai checkpoint                    # mark "I have read up to here"
+memai diff --last                   # resume delta without hunting for a hash
+memai pack handoff                  # budgeted bundle: card + notes + resume version
+memai eval                          # recall@k / MRR per mode from .memai/eval.json
+memai miss --stats                  # per-repo retrieval-miss counts
+```
+
+`pack` is the session-end move: one clamped page with the card, the board
+notes, optional `--fault` slices, and the exact `diff --since` version for the
+next agent. `eval` fixtures are `[{"q":"...","expect":"src/x.js"}]` pairs —
+run it after index upgrades to see whether recall actually moved.
+
 ## How it works
 
 ```

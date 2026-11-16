@@ -11,7 +11,7 @@ import { MemoryStore } from './store.mjs'
 import { MemoryPages, DEFAULTS } from './page.mjs'
 import { estTokens } from './tokens.mjs'
 
-export const VERSION = '0.2.1'
+export const VERSION = '0.3.0'
 
 const HELP = `MemAi CLI  (tokens are the currency; every response has a token count)
 
@@ -22,6 +22,14 @@ const HELP = `MemAi CLI  (tokens are the currency; every response has a token co
   card [--budget 700]        project card: stack, commands, entrypoints, conventions
   map [--budget 3500]        symbol map for every file (the "don't read files" page)
   diff [--since HASH]        tiny delta from an old version (new-session resume)
+  diff --last [--agent A]    delta since your last checkpoint
+  checkpoint [--agent A]     record the current version for a later diff --last
+  graph <path|sym> [--depth N]   module dependency navigation: importers,
+                             imports, reverse chains, cycles (from the imports table)
+  pack [topic] [--fault "a,b"] [--no-card] [--budget 1500]  budgeted handoff
+                             bundle: card + board notes + fault slices + resume version
+  eval [--fixtures FILE] [--k 5] [--modes index,hybrid]  retrieval quality harness;
+                             fixtures: [{"q":"...","expect":"src/x.js"}], default .memai/eval.json
   get <pageId> [--budget 1200]    page text (file:<path> | project.card | project.map | board:<t>)
   query <terms> [--k 5] [--budget 400] [--rg]   ranked hits, snippets only;
                                  --rg unions a ripgrep body sweep (catches what the index does not page)
@@ -104,7 +112,41 @@ export async function run(argv, { env = null } = {}) {
       case 'status': return { ok: true, cmd, ...pages.status() }
       case 'card': return { ok: true, cmd, ...pages.card({ budget: num(flags.budget, DEFAULTS.card) }) }
       case 'map': return { ok: true, cmd, ...pages.map({ budget: num(flags.budget, DEFAULTS.map) }) }
-      case 'diff': return { ok: true, cmd, ...pages.diff({ since: flags.since ?? null, budget: num(flags.budget, DEFAULTS.diff) }) }
+      case 'diff': return {
+        ok: true, cmd,
+        ...pages.diff({
+          since: flags.since ?? null, budget: num(flags.budget, DEFAULTS.diff),
+          last: !!flags.last, agent: String(flags.agent ?? (process.env.MEMAI_AGENT ?? process.env.MEM_AGENT) ?? 'anon'),
+        }),
+      }
+      case 'checkpoint': {
+        const agent = String(flags.agent ?? (process.env.MEMAI_AGENT ?? process.env.MEM_AGENT) ?? 'anon')
+        return { ok: true, cmd, ...pages.checkpoint(agent) }
+      }
+      case 'graph': {
+        const target = positional.slice(1).join(' ')
+        if (!target) return { ok: false, cmd, error: 'usage: graph <path|symbol> [--depth N]', tokens: 0 }
+        return { ok: true, cmd, ...pages.graph(target, { depth: num(flags.depth, 1), budget: num(flags.budget, DEFAULTS.graph) }) }
+      }
+      case 'pack': {
+        const topic = positional[1] ?? 'handoff'
+        const agent = String(flags.agent ?? (process.env.MEMAI_AGENT ?? process.env.MEM_AGENT) ?? 'anon')
+        const faults = flags.fault && flags.fault !== true ? [String(flags.fault)] : []
+        return { ok: true, cmd, ...pages.pack(topic, { budget: num(flags.budget, DEFAULTS.pack), faults, card: !flags['no-card'], agent }) }
+      }
+      case 'eval': {
+        const file = flags.fixtures && flags.fixtures !== true ? path.resolve(String(flags.fixtures)) : path.join(root, '.memai', 'eval.json')
+        let fixtures
+        try { fixtures = JSON.parse(fs.readFileSync(file, 'utf8')) } catch {
+          return {
+            ok: false, cmd,
+            error: `no fixtures at ${file} — create it as JSON: [{"q":"verify token","expect":"src/auth.js"}, …] (or pass --fixtures FILE)`,
+            tokens: 0,
+          }
+        }
+        const modes = flags.modes && flags.modes !== true ? String(flags.modes).split(',').map((m) => m.trim()).filter(Boolean) : ['index', 'hybrid']
+        return { ok: true, cmd, ...pages.evaluate(fixtures, { k: num(flags.k, 5), modes }) }
+      }
       case 'get': {
         const id = positional[1]
         if (!id) return { ok: false, cmd, error: 'usage: get <pageId>', tokens: 0 }
