@@ -14,8 +14,12 @@
 //     card + no timestamps), so provider prefix caching can hit;
 //   * read-only: the hook never creates a store or indexes. `memai init` does
 //     that explicitly.
-import { openProject, closeProject } from './paths.mjs'
+import fs from 'node:fs'
+import path from 'node:path'
+import { openProject, closeProject, nearestProjectRoot, resolveDb } from './paths.mjs'
 import { estTokens } from '../src/tokens.mjs'
+import { MemoryStore } from '../src/store.mjs'
+import { MemoryPages } from '../src/page.mjs'
 
 export const HOOK_EVENTS = ['SessionStart', 'SubagentStart']
 
@@ -58,5 +62,30 @@ export function hookCardPayload({ root = null, db = null, env = process.env, cwd
     text: additionalContext,
     tokens: estTokens(additionalContext),
     json: { hookSpecificOutput: { hookEventName: event, additionalContext } },
+  }
+}
+
+/**
+ * PostToolUse (`memai hook index`): distil the file an editing tool just wrote
+ * into the project store. Reads the Claude-style hook payload
+ * `{tool_name, tool_input:{file_path}}` (top-level `file_path` also accepted),
+ * finds the owning project by walking up from the file, and runs a targeted
+ * single-file index. Sub-second; the caller stays silent and exits 0 no matter
+ * what — a broken re-index must never fail a session.
+ */
+export async function hookIndexFile({ payload = null, root = null, db = null, env = process.env, cwd = process.cwd() } = {}) {
+  const filePath = payload?.tool_input?.file_path ?? payload?.inputs?.file_path ?? payload?.file_path ?? null
+  if (!filePath || typeof filePath !== 'string') return { ok: true, indexed: false, reason: 'no file_path in payload' }
+  const abs = path.resolve(cwd, filePath)
+  const projectRoot = root ? path.resolve(root) : nearestProjectRoot(path.dirname(abs))
+  const dbPath = resolveDb(projectRoot, { db, env })
+  if (!fs.existsSync(dbPath)) return { ok: true, indexed: false, reason: `no store at ${dbPath}` }
+  const store = new MemoryStore({ dbPath, root: projectRoot })
+  try {
+    const pages = new MemoryPages({ store, root: projectRoot })
+    const r = await pages.indexFiles([abs])
+    return { ok: true, indexed: r.readFiles > 0 || r.deleted > 0, readFiles: r.readFiles, reused: r.reused, deleted: r.deleted, version: r.version }
+  } finally {
+    store.close()
   }
 }

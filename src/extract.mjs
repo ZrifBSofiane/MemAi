@@ -65,7 +65,7 @@ function applyGitignoreRule(rule) {
   const re = anchored || r.includes('/') ? new RegExp(`^${body}${dirOnly ? '(/|$)' : '(/|$)'}`) : new RegExp(`(^|/)${body}${dirOnly ? '(/|$)' : '(/|$)'}`)
   return { re, neg, dirOnly }
 }
-function readGitignore(root) {
+export function readGitignore(root) {
   const rules = []
   for (const name of ['.gitignore', '.git/info/exclude']) {
     try { for (const line of fs.readFileSync(path.join(root, name), 'utf8').split('\n')) { const r = applyGitignoreRule(line); if (r) rules.push(r) } } catch {}

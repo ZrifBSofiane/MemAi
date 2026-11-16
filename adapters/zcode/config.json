@@ -21,6 +21,25 @@
               "command": "npx",
               "args": ["-y", "-p", "memai-cli", "memai", "hook", "card"],
               "timeoutMs": 20000
+            },
+            {
+              "type": "process",
+              "command": "npx",
+              "args": ["-y", "-p", "memai-cli", "memai", "watch", "--ensure"],
+              "timeoutMs": 10000
+            }
+          ]
+        }
+      ],
+      "PostToolUse": [
+        {
+          "matcher": "Edit|Write|MultiEdit",
+          "hooks": [
+            {
+              "type": "process",
+              "command": "npx",
+              "args": ["-y", "-p", "memai-cli", "memai", "hook", "index"],
+              "timeoutMs": 15000
             }
           ]
         }
