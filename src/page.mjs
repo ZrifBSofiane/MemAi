@@ -17,9 +17,10 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import crypto from 'node:crypto'
+import { execFileSync } from 'node:child_process'
 import { sha1 } from './store.mjs'
 import { estTokens, clampText } from './tokens.mjs'
-import { EXTRACTOR_VERSION, langOf, isTestPath } from './extract.mjs'
+import { EXTRACTOR_VERSION, KEYWORDS, langOf, isTestPath } from './extract.mjs'
 
 export const DEFAULTS = {
   card: 700, map: 3500, get: 1200, fault: 600, query: 400, diff: 600,
@@ -221,20 +222,20 @@ export class MemoryPages {
 
   // ---------------------------------------------------------------- fault ---
 
-  /** Demand-page one slice: symbol name, path#symbol, path:line, or path page. */
-  fault(target, { budget = DEFAULTS.fault } = {}) {
+  /** Demand-page one slice: symbol name, path#symbol, path:line, or path page. `--deep` adds one-hop context. */
+  fault(target, { budget = DEFAULTS.fault, deep = false } = {}) {
     target = normPath(target)
     if (!target) return { ok: false, error: 'empty fault target', tokens: 0 }
     if (target.startsWith('file:')) target = target.slice(5)
     let m
-    if ((m = /^(.*)#([\w$.-]+)$/.exec(target))) return this._faultSymbol(m[2], m[1], { budget })
+    if ((m = /^(.*)#([\w$.-]+)$/.exec(target))) return this._faultSymbol(m[2], m[1], { budget, deep })
     if ((m = /^(.*):(\d+)$/.exec(target))) return this._faultLine(m[1], Number(m[2]), { budget })
     const asFile = this._findFile(target)
     if (asFile) {
       const r = this.resolve(`file:${asFile.path}`, { budget })
       return { ...r, target, mode: 'file-page' }
     }
-    return this._faultSymbol(target, null, { budget })
+    return this._faultSymbol(target, null, { budget, deep })
   }
 
   _findFile(p) {
@@ -244,7 +245,41 @@ export class MemoryPages {
     return rows.length === 1 ? rows[0] : null
   }
 
-  _faultSymbol(name, wantedPath, { budget }) {
+  /**
+   * One-hop context for a symbol slice: callees (identifiers in the slice that
+   * are known code symbols) and best-effort callers (declaration lines that
+   * mention the name — single-line bodies only). Budget-bounded, no guarantees.
+   */
+  _deepContext(best, code) {
+    const idents = new Set()
+    for (const m of code.matchAll(/[A-Za-z_$][\w$]{2,}/g)) {
+      if (KEYWORDS.has(m[0])) continue
+      idents.add(m[0].toLowerCase())
+    }
+    idents.delete(best.name.toLowerCase())
+    const isCodeSym = (r) => ['function', 'method', 'class', 'type', 'route', 'export'].includes(r.kind)
+    const own = (r) => r.path === best.path && r.line === best.line
+    const callees = []
+    const names = [...idents]
+    if (names.length) {
+      const q = names.map(() => '?').join(',')
+      for (const r of this.store.all(`SELECT name, kind, path, line, signature FROM symbols WHERE lname IN (${q}) ORDER BY path, line LIMIT 200`, ...names)) {
+        if (own(r) || !isCodeSym(r) || callees.some((c) => c.path === r.path && c.line === r.line)) continue
+        callees.push(r)
+        if (callees.length >= 8) break
+      }
+    }
+    const esc = String(best.name).replace(/[%_\\]/g, (c) => `\\${c}`)
+    const callers = []
+    for (const r of this.store.all(`SELECT name, kind, path, line, signature FROM symbols WHERE signature LIKE ? ESCAPE '\\' ORDER BY path, line LIMIT 60`, `%${esc}%`)) {
+      if (own(r) || !isCodeSym(r) || callers.some((c) => c.path === r.path && c.line === r.line)) continue
+      callers.push(r)
+      if (callers.length >= 5) break
+    }
+    return { callees, callers }
+  }
+
+  _faultSymbol(name, wantedPath, { budget, deep = false }) {
     let candidates
     if (wantedPath) {
       const f = this._findFile(wantedPath)
@@ -268,15 +303,32 @@ export class MemoryPages {
     const code = lines.slice(sl.start, sl.end).join('\n')
     const s = this._fileStale(this.store.getFile(best.path))
     const stale = s ? s.stale : null
+    let deepInfo = null
+    let bodyText = code
+    if (deep) {
+      deepInfo = this._deepContext(best, code)
+      const deepLines = []
+      if (deepInfo.callees.length) {
+        deepLines.push('# deep callees:')
+        for (const c of deepInfo.callees) deepLines.push(`  ${c.path}:${c.line}  ${c.signature.slice(0, 90)}`)
+      }
+      if (deepInfo.callers.length) {
+        deepLines.push('# deep callers (best-effort):')
+        for (const c of deepInfo.callers) deepLines.push(`  ${c.path}:${c.line}  ${c.signature.slice(0, 90)}`)
+      }
+      if (deepLines.length) bodyText = `${code}\n${deepLines.join('\n')}`
+    }
     const header = (body) =>
       `# fault ${best.name} (${best.kind}) ${best.path}:${startLine}-${sl.end}  ${sl.end - sl.start}L  tokens=${body.tokens}/${budget}` +
       (stale ? '  [STALE: file changed since index — lines approximate]' : '') +
       (candidates.length > 1 ? `  (+${candidates.length - 1} other match${candidates.length > 2 ? 'es' : ''}: ${candidates.slice(1, 3).map((c) => `${c.path}:${c.line}`).join(', ')})` : '') +
       `\n# file page: get file:${best.path}`
-    const r = fitWithHeader(code, budget, header)
+    const r = fitWithHeader(bodyText, budget, header)
     return {
       ok: true, target: name, mode: 'symbol', symbol: best.name, kind: best.kind, path: best.path, line: startLine, lineEnd: sl.end,
-      lines: sl.end - sl.start, stale, tokens: r.tokens, budget, truncated: r.truncated, text: r.text,
+      lines: sl.end - sl.start, stale,
+      deep: deepInfo ? { callees: deepInfo.callees.map((c) => ({ path: c.path, line: c.line, name: c.name, kind: c.kind })), callers: deepInfo.callers.map((c) => ({ path: c.path, line: c.line, name: c.name, kind: c.kind })) } : undefined,
+      tokens: r.tokens, budget, truncated: r.truncated, text: r.text,
       also: candidates.slice(1, 4).map((c) => `${c.path}:${c.line}`),
     }
   }
@@ -298,8 +350,51 @@ export class MemoryPages {
 
   // ---------------------------------------------------------------- query ---
 
-  /** Ranked, compact hits: symbol rows first, then page-text FTS hits. */
-  query(q, { k = 5, budget = DEFAULTS.query, kind = null } = {}) {
+  /**
+   * Ripgrep ground-truth pass: finds content in file bodies the index never
+   * pages (signatures only). Best-effort — unavailable/timeout degrades to a
+   * note, never an error.
+   */
+  _rgSearch(q, { cap = 5, timeoutMs = 5000 } = {}) {
+    const terms = String(q).toLowerCase().split(/[^a-z0-9_$]+/i).filter((t) => t.length >= 2).slice(0, 6)
+    if (!terms.length) return { hits: [], note: null }
+    const rootPosix = String(this.root).replace(/\\/g, '/').replace(/\/+$/, '') + '/'
+    let raw = ''
+    try {
+      raw = execFileSync('rg', ['--json', '--max-count', '3', '--smart-case', '--no-messages', '-e', ...terms, this.root], { encoding: 'utf8', maxBuffer: 8 * 1024 * 1024, timeout: timeoutMs })
+    } catch (err) {
+      if (err?.code === 'ENOENT') return { hits: [], note: 'rg: unavailable' }
+      if (err?.killed || err?.signal) return { hits: [], note: 'rg: timed out' }
+      // exit 1 = no matches; exit 2+ = some file was unreadable (AV lock, perms)
+      // but stdout still carries every match found before that. Take them.
+      raw = err?.stdout ?? ''
+      if (!raw) return { hits: [], note: `rg: failed (${err?.status ?? 'unknown'})` }
+    }
+    const hits = []
+    const seen = new Set()
+    for (const line of raw.split('\n')) {
+      if (!line.startsWith('{')) continue
+      let m
+      try { m = JSON.parse(line) } catch { continue }
+      if (m.type !== 'match' || !m.data?.path?.text) continue
+      let rel = String(m.data.path.text).replace(/\\/g, '/')
+      if (rel.toLowerCase().startsWith(rootPosix.toLowerCase())) rel = rel.slice(rootPosix.length)
+      else if (/^([A-Za-z]:\/|\/)/.test(rel)) continue // outside the project root
+      rel = rel.replace(/^(\.\/)+/, '')
+      const key = `${rel}:${m.data.line_number}`
+      if (seen.has(key)) continue
+      seen.add(key)
+      hits.push({
+        pageId: `file:${rel}`, kind: 'text', path: rel, symbol: null, line: m.data.line_number,
+        snippet: String(m.data.lines?.text ?? '').trim().slice(0, 140), score: 0.5, source: 'rg',
+      })
+      if (hits.length >= cap) break
+    }
+    return { hits, note: null }
+  }
+
+  /** Ranked, compact hits: symbol rows first, then page-text FTS hits; `--rg` unions a body sweep. */
+  query(q, { k = 5, budget = DEFAULTS.query, kind = null, rg = false } = {}) {
     const ident = /^[A-Za-z_$][\w$.:-]*$/.test(q.trim())
     const hits = []
     const seen = new Set()
@@ -318,7 +413,20 @@ export class MemoryPages {
         push({ pageId: p.pageId, kind: 'page', path: p.path, symbol: null, line: null, snippet: p.snippet, score: 1 })
       }
     }
-    const top = hits.slice(0, k)
+    let top = hits.slice(0, k)
+    let rgNote = null
+    if (rg) {
+      const extra = this._rgSearch(q, { cap: 5 })
+      rgNote = extra.note
+      const seenLines = new Set(top.map((h) => `${h.path}:${h.line}`))
+      for (const h of extra.hits) {
+        const key = `${h.path}:${h.line}`
+        if (seenLines.has(key)) continue
+        seenLines.add(key)
+        top.push(h)
+      }
+    }
+    top = top.slice(0, k + (rg ? 5 : 0))
     if (this.staleCheck !== false) {
       for (const h of top) {
         if (!h.path) continue
@@ -328,11 +436,12 @@ export class MemoryPages {
     }
     const lines = [`# query "${q}" — ${top.length} hit${top.length === 1 ? '' : 's'} (use fault <symbol> or get <pageId>)`]
     for (const h of top) {
-      lines.push(`${h.symbol ? 'sym' : 'page'} ${h.pageId}${h.line ? `:${h.line}` : ''}  ${h.symbol ? `${h.symbolKind} ${h.symbol}: ` : ''}${(h.snippet || '').slice(0, 120)}${h.stale ? '  [STALE]' : ''}`)
+      lines.push(`${h.symbol ? 'sym' : h.kind === 'text' ? 'text' : 'page'} ${h.pageId}${h.line ? `:${h.line}` : ''}  ${h.symbol ? `${h.symbolKind} ${h.symbol}: ` : ''}${(h.snippet || '').slice(0, 120)}${h.stale ? '  [STALE]' : ''}`)
     }
     if (!top.length) lines.push('(no hits — try a broader term or `map`)')
+    if (rgNote) lines.push(`(${rgNote})`)
     const r = clampText(lines.join('\n'), budget)
-    return { ok: true, query: q, hits: top, count: top.length, tokens: r.tokens, budget, truncated: r.truncated, text: r.text }
+    return { ok: true, query: q, hits: top, count: top.length, rgNote, tokens: r.tokens, budget, truncated: r.truncated, text: r.text }
   }
 
   // ---------------------------------------------------------------- merge ---
@@ -391,6 +500,24 @@ export class MemoryPages {
     this.store.recordVersion({ versionHash, rootHash, parentHash: prev?.version_hash ?? null, manifest, producer })
     this.store.setMeta('last_version', versionHash)
     return versionHash
+  }
+
+  // ----------------------------------------------------------------- miss ---
+
+  /** Log a retrieval miss so recall gaps become visible per-repo instead of invisible. */
+  recordMiss(query, { foundBy = null, hitPath = null, agent = 'anon' } = {}) {
+    const r = this.store.recordMiss({ query, foundBy, hitPath, agent })
+    return { ok: true, id: r.id, tokens: estTokens(String(query)), text: `miss #${r.id} recorded` }
+  }
+
+  missStats({ budget = 400 } = {}) {
+    const s = this.store.missStats({ limit: 10 })
+    const lines = [`# miss stats — ${s.total} recorded`]
+    for (const t of s.byTool) lines.push(`found_by=${t.tool}: ${t.n}`)
+    for (const t of s.top) lines.push(`${t.n}x  ${String(t.query).slice(0, 80)}`)
+    if (!s.total) lines.push('(no misses recorded — after a retrieval miss: `miss "<query>" --found-by rg --path <where it was>`)')
+    const r = clampText(lines.join('\n'), budget)
+    return { ok: true, total: s.total, top: s.top, byTool: s.byTool, tokens: r.tokens, budget, truncated: r.truncated, text: r.text }
   }
 
   // ----------------------------------------------------------------- board ---

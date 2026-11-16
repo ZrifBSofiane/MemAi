@@ -19,7 +19,7 @@ import { defaultAgent, isGranularTools, openProject, closeProject } from './path
 export const TOOL_NAME = 'mem'
 export const SERVER_NAME = 'memai-mcp'
 
-export const OPS = ['card', 'map', 'query', 'fault', 'get', 'diff', 'status', 'index', 'note', 'post', 'inbox']
+export const OPS = ['card', 'map', 'query', 'fault', 'get', 'diff', 'status', 'index', 'note', 'post', 'inbox', 'miss']
 
 /** Ops that may create the store/db when it does not exist yet. */
 const WRITE_OPS = new Set(['index', 'note', 'post'])
@@ -69,14 +69,19 @@ function memInputSchema() {
       op: {
         type: 'string',
         enum: OPS,
-        description: 'Operation. card|map|status read pages; query+fault locate and fetch code; get reads one page; diff resumes since a version; index refreshes after edits; note/post/inbox share state with other agents.',
+        description: 'Operation. card|map|status read pages; query+fault locate and fetch code; get reads one page; diff resumes since a version; index refreshes after edits; note/post/inbox share state with other agents; miss logs a retrieval failure.',
       },
       budget: { type: 'integer', minimum: 1, maximum: 4000, description: 'Token budget for this response; defaults are tuned, pass a smaller budget for a cheap peek.' },
       maxFiles: { type: 'integer', minimum: 1, maximum: 100000, description: 'index: cap on indexed files.' },
       force: { type: 'boolean', description: 'index: re-extract files even when unchanged.' },
-      q: { type: 'string', description: 'query: search terms or a symbol name.' },
+      q: { type: 'string', description: 'query: search terms or a symbol name. miss: the query that failed.' },
       k: { type: 'integer', minimum: 1, maximum: 20, description: 'query: number of ranked hits (default 5).' },
+      rg: { type: 'boolean', description: 'query: also union a ripgrep pass over file bodies (ground-truth net for content the index does not page).' },
       target: { type: 'string', description: 'fault: symbol, path#symbol, path:line, or path.' },
+      deep: { type: 'boolean', description: 'fault: append one-hop context (callees + best-effort callers).' },
+      foundBy: { type: 'string', description: 'miss: which tool found it (rg | grep | manual).' },
+      hitPath: { type: 'string', description: 'miss: where it was found (path or page id).' },
+      stats: { type: 'boolean', description: 'miss: return miss stats instead of recording one.' },
       pageId: { type: 'string', description: 'get: file:<path> | project.card | project.map | board:<topic>.' },
       since: { type: 'string', description: 'diff: previous project version hash; omit to just see the current version.' },
       topic: { type: 'string', description: 'note/post/inbox: board topic (e.g. handoff, review:auth).' },
@@ -123,13 +128,13 @@ const granularSpec = [
   },
   {
     name: 'mem_query', op: 'query', title: 'MemAi: ranked search',
-    description: 'Ranked symbol/page hits with snippets, no bodies (default ~65 tokens). Use to locate a symbol or feature, then fetch the winner with mem_fault. Do not use it to read content; do not run many tiny queries instead of one full read.',
-    inputSchema: { type: 'object', properties: { q: { type: 'string' }, k: { type: 'integer', minimum: 1, maximum: 20 }, budget: { type: 'integer', minimum: 1, maximum: 1200 } }, required: ['q'], additionalProperties: false },
+    description: 'Ranked symbol/page hits with snippets, no bodies (default ~65 tokens); rg: true unions a ripgrep body sweep for content the index does not page. Use to locate a symbol or feature, then fetch the winner with mem_fault. Do not use it to read content; do not run many tiny queries instead of one full read.',
+    inputSchema: { type: 'object', properties: { q: { type: 'string' }, k: { type: 'integer', minimum: 1, maximum: 20 }, rg: { type: 'boolean' }, budget: { type: 'integer', minimum: 1, maximum: 1200 } }, required: ['q'], additionalProperties: false },
   },
   {
     name: 'mem_fault', op: 'fault', title: 'MemAi: page one slice',
-    description: `Demand-page exactly one symbol body / line range / file page under a token budget. This is the default way to read code: prefer it over reading whole files. ${WHEN_NOT_USE} If you need the whole file anyway, read it directly.`,
-    inputSchema: { type: 'object', properties: { target: { type: 'string' }, budget: { type: 'integer', minimum: 1, maximum: 2500 } }, required: ['target'], additionalProperties: false },
+    description: `Demand-page exactly one symbol body / line range / file page under a token budget; deep: true appends callees and best-effort callers. This is the default way to read code: prefer it over reading whole files. ${WHEN_NOT_USE} If you need the whole file anyway, read it directly.`,
+    inputSchema: { type: 'object', properties: { target: { type: 'string' }, deep: { type: 'boolean' }, budget: { type: 'integer', minimum: 1, maximum: 2500 } }, required: ['target'], additionalProperties: false },
   },
   {
     name: 'mem_get', op: 'get', title: 'MemAi: read a page',
@@ -155,6 +160,11 @@ const granularSpec = [
     name: 'mem_inbox', op: 'inbox', title: 'MemAi: read the board',
     description: 'Messages since your read cursor (advances it), oldest first, budget-clamped. Use at session start or after a handoff; do not poll it repeatedly within one step.',
     inputSchema: { type: 'object', properties: { agent: { type: 'string' }, since: { type: 'integer', minimum: 0 }, topic: { type: 'string' }, budget: { type: 'integer', minimum: 1, maximum: 2000 }, advance: { type: 'boolean' } }, additionalProperties: false },
+  },
+  {
+    name: 'mem_miss', op: 'miss', title: 'MemAi: log a retrieval miss',
+    description: 'Record that a lookup failed here and what found it instead (rg/grep/manual); stats: true returns the per-repo miss counts. Use it right after you fell back to grep — that is how recall gaps become visible and fixable.',
+    inputSchema: { type: 'object', properties: { q: { type: 'string' }, foundBy: { type: 'string' }, hitPath: { type: 'string' }, agent: { type: 'string' }, stats: { type: 'boolean' }, budget: { type: 'integer', minimum: 1, maximum: 1200 } }, additionalProperties: false },
   },
 ]
 
@@ -255,12 +265,18 @@ export async function dispatch({ root = null, db = null, env = process.env, cwd 
       case 'query': {
         const q = str(args.q)
         if (!q) return errorResult(op, 'query requires q (search terms or a symbol name)')
-        return toToolResult(op, pages.query(q, { k: clampInt(args.k, 5, 1, 20), budget: budgetFor('query', args) }))
+        return toToolResult(op, pages.query(q, { k: clampInt(args.k, 5, 1, 20), budget: budgetFor('query', args), rg: !!args.rg }))
       }
       case 'fault': {
         const target = str(args.target)
         if (!target) return errorResult(op, 'fault requires target (symbol | path#symbol | path:line | path)')
-        return toToolResult(op, pages.fault(target, { budget: budgetFor('fault', args) }))
+        return toToolResult(op, pages.fault(target, { budget: budgetFor('fault', args), deep: !!args.deep }))
+      }
+      case 'miss': {
+        if (args.stats) return toToolResult(op, pages.missStats({ budget: budgetFor('query', args) }))
+        const q = str(args.q)
+        if (!q) return errorResult(op, 'miss requires q (the query that failed)')
+        return toToolResult(op, pages.recordMiss(q, { foundBy: str(args.foundBy) || null, hitPath: str(args.hitPath) || null, agent: str(args.agent) || defaultAgent(env) }))
       }
       case 'index': {
         const res = await pages.index({ maxFiles: clampInt(args.maxFiles, 4000, 1, 100000), force: !!args.force })

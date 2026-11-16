@@ -138,6 +138,14 @@ CREATE TABLE IF NOT EXISTS index_meta (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS misses (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  query TEXT NOT NULL,
+  found_by TEXT,
+  hit_path TEXT,
+  agent TEXT NOT NULL DEFAULT 'anon',
+  ts INTEGER NOT NULL
+);
 CREATE VIRTUAL TABLE IF NOT EXISTS fts USING fts5(page_id UNINDEXED, kind UNINDEXED, body);
 `
 
@@ -313,6 +321,20 @@ export class MemoryStore {
   }
   symbolsForPage(pageId) { return this.all('SELECT * FROM symbols WHERE page_id = ? ORDER BY line', pageId) }
   importsForFile(p) { return this.all('SELECT module FROM imports WHERE page_id = ? ORDER BY module', `file:${p}`).map((r) => r.module) }
+
+  // ------------------------------------------------------------- misses ---
+
+  /** Log a retrieval miss (index/query did not have it; something else did). */
+  recordMiss({ query, foundBy = null, hitPath = null, agent = 'anon' }) {
+    const r = this.run('INSERT INTO misses(query, found_by, hit_path, agent, ts) VALUES (?,?,?,?,?)', String(query), foundBy, hitPath, agent, Date.now())
+    return { id: Number(r.lastInsertRowid) }
+  }
+  missStats({ limit = 10 } = {}) {
+    const total = this.one('SELECT COUNT(*) AS n FROM misses').n
+    const top = this.all('SELECT query, COUNT(*) AS n, MAX(ts) AS last FROM misses GROUP BY query ORDER BY n DESC, last DESC LIMIT ?', limit)
+    const byTool = this.all("SELECT COALESCE(found_by, 'none') AS tool, COUNT(*) AS n FROM misses GROUP BY COALESCE(found_by, 'none') ORDER BY n DESC")
+    return { total, top, byTool }
+  }
 
   // ----------------------------------------------------------- fts search ---
 

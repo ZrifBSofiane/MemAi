@@ -148,7 +148,7 @@ function looksBinary(buf) {
 // Symbol extraction (regex, deterministic, per language)
 // ---------------------------------------------------------------------------
 
-const KEYWORDS = new Set('if for while switch catch function return new do else try finally with await yield throw typeof instanceof delete void class constructor'.split(' '))
+export const KEYWORDS = new Set('if for while switch catch function return new do else try finally with await yield throw typeof instanceof delete void class constructor'.split(' '))
 
 function rulesFor(lang) {
   // Top-level declarations only for functions/classes/consts: local variables a
