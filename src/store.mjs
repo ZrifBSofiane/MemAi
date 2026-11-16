@@ -75,6 +75,8 @@ CREATE TABLE IF NOT EXISTS files (
   lang TEXT NOT NULL,
   mtime INTEGER NOT NULL,
   tokens INTEGER NOT NULL DEFAULT 0,
+  looks_esm INTEGER NOT NULL DEFAULT 0,
+  looks_cjs INTEGER NOT NULL DEFAULT 0,
   page_id TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS symbols (
@@ -154,13 +156,22 @@ export class MemoryStore {
       if (create) fs.mkdirSync(path.dirname(this.dbPath), { recursive: true })
     }
     this.db = create ? new DatabaseSync(this.dbPath || ':memory:') : new DatabaseSync(this.dbPath, { readOnly: true })
+    this._stmts = new Map()
     if (create) {
       this.db.exec('PRAGMA journal_mode = WAL;')
       this.db.exec('PRAGMA synchronous = NORMAL;')
       this.db.exec('PRAGMA foreign_keys = ON;')
       this.db.exec(SCHEMA)
+      this._migrate()
     }
-    this._stmts = new Map()
+  }
+
+  /** Additive column migrations for stores created by older versions (CREATE
+   * TABLE IF NOT EXISTS cannot add columns to an existing table). */
+  _migrate() {
+    const cols = new Set(this.all(`SELECT name FROM pragma_table_info('files')`).map((r) => r.name))
+    if (!cols.has('looks_esm')) this.exec('ALTER TABLE files ADD COLUMN looks_esm INTEGER NOT NULL DEFAULT 0')
+    if (!cols.has('looks_cjs')) this.exec('ALTER TABLE files ADD COLUMN looks_cjs INTEGER NOT NULL DEFAULT 0')
   }
 
   /** Prepared statement cache. */
@@ -249,13 +260,14 @@ export class MemoryStore {
 
   // ---------------------------------------------------------------- files ---
 
-  upsertFile({ path: p, contentHash, bytes, loc, lang, mtime, tokens = 0 }) {
+  upsertFile({ path: p, contentHash, bytes, loc, lang, mtime, tokens = 0, looksEsm = 0, looksCjs = 0 }) {
     const pageId = `file:${p}`
     this.run(
-      `INSERT INTO files(path, content_hash, bytes, loc, lang, mtime, tokens, page_id) VALUES (?,?,?,?,?,?,?,?)
+      `INSERT INTO files(path, content_hash, bytes, loc, lang, mtime, tokens, looks_esm, looks_cjs, page_id) VALUES (?,?,?,?,?,?,?,?,?,?)
        ON CONFLICT(path) DO UPDATE SET content_hash=excluded.content_hash, bytes=excluded.bytes,
-         loc=excluded.loc, lang=excluded.lang, mtime=excluded.mtime, tokens=excluded.tokens, page_id=excluded.page_id`,
-      p, contentHash, bytes, loc, lang, mtime, tokens, pageId
+         loc=excluded.loc, lang=excluded.lang, mtime=excluded.mtime, tokens=excluded.tokens,
+         looks_esm=excluded.looks_esm, looks_cjs=excluded.looks_cjs, page_id=excluded.page_id`,
+      p, contentHash, bytes, loc, lang, mtime, tokens, looksEsm ? 1 : 0, looksCjs ? 1 : 0, pageId
     )
     return pageId
   }

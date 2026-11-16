@@ -67,6 +67,11 @@ export class MemoryPages {
     return import('./extract.mjs').then(({ indexCorpus }) => indexCorpus(this.store, { root: this.root, ...opts }))
   }
 
+  /** Incremental: index exactly these paths, then rebuild card/map/manifest. */
+  indexFiles(paths, opts = {}) {
+    return import('./extract.mjs').then(({ indexFiles }) => indexFiles(this.store, { root: this.root, paths, ...opts }))
+  }
+
   // ------------------------------------------------------------ staleness ---
 
   /**

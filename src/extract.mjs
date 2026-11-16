@@ -413,9 +413,12 @@ export function renderProjectCard({ root, files, records, version, commands, ent
 // ---------------------------------------------------------------------------
 
 export function readConfigInfo(root, files) {
-  const byPath = new Map(files.map((f) => [f.path, f]))
+  // Accepts both store rows (.path) and records (.rel); the ESM/CJS
+  // conventions need the callers' looksEsm/looksCjs, so finalizeIndex passes records.
+  const relOf = (f) => f.rel ?? f.path
+  const byPath = new Map(files.map((f) => [relOf(f), f]))
   const info = { name: null, description: null, commands: [], entrypoints: [], conventions: [] }
-  const relPaths = files.map((f) => f.path)
+  const relPaths = files.map(relOf)
   // package.json
   const pkgRel = relPaths.find((p) => p === 'package.json') || relPaths.find((p) => p.endsWith('/package.json') && p.split('/').length <= 2)
   if (pkgRel) {
@@ -494,68 +497,115 @@ function topLevelLayout(files) {
 // ---------------------------------------------------------------------------
 
 /**
- * Distil `root` into the store. Deterministic; idempotent (same tree => same
- * project version). Returns statistics including the new project version hash.
+ * True when a repo-relative path is indexable by the walk branch of listFiles
+ * (extension whitelist, no ignored/hidden dir segments, no ignored file
+ * pattern, not gitignored). Shared by `indexFiles` and the watcher; `listFiles`
+ * applies the same gates inline while walking.
  */
-export function indexCorpus(store, { root, maxFiles = 4000, cardBudget = 700, mapBudget = 3500, useGit = true, force = false, ignore = [] } = {}) {
-  const t0 = performance.now()
-  root = path.resolve(root)
-  const listed = listFiles(root, { maxFiles, useGit, ignore })
-  const records = []
-  let readFiles = 0
-  let reused = 0
-  let deleted = 0
-
-  // Files that vanished from the tree disappear from the index.
-  const seen = new Set(listed.files.map((f) => f.path))
-  for (const row of store.allFiles()) {
-    if (!seen.has(row.path)) { store.deleteFile(row.path); deleted++ }
+export function isIndexableRel(rel, { rules = [] } = {}) {
+  const p = String(rel).replace(/\\/g, '/')
+  if (!p || p.endsWith('/')) return false
+  const segs = p.split('/')
+  for (let i = 0; i < segs.length - 1; i++) {
+    const s = segs[i]
+    if (!s || s === '.' || s === '..') return false
+    if (IGNORE_DIRS.has(s) || s.startsWith('.')) return false
   }
+  const ext = path.extname(p).slice(1).toLowerCase()
+  if (!LANG_BY_EXT[ext]) return false
+  if (IGNORE_FILE_RES.some((re) => re.test(p))) return false
+  if (rules.length && ignoredByGitignore(p, false, rules)) return false
+  return true
+}
 
-  for (const f of listed.files) {
-    let buf
-    try { buf = fs.readFileSync(f.abs) } catch { continue }
-    if (looksBinary(buf)) continue
-    const text = buf.toString('utf8')
-    const contentHash = sha1(buf)
-    const lang = langOf(f.path)
-    const prev = store.getFile(f.path)
-    const prevPage = prev ? store.getPage(`file:${f.path}`) : null
-    const expectedVersion = filePageVersion(f.path, contentHash)
-    if (!force && prev && prev.content_hash === contentHash && prevPage && prevPage.version_hash === expectedVersion) {
-      // Unchanged content: reuse symbol rows, only refresh mtime/tokens if needed.
-      reused++
-      const symbols = store.symbolsForPage(`file:${f.path}`)
-      records.push({
+/** Normalise any path (absolute, relative, Windows) to a repo-relative posix path. */
+function relInside(root, p) {
+  let s = String(p).replace(/\\/g, '/')
+  const r = String(root).replace(/\\/g, '/').replace(/\/+$/, '') + '/'
+  if (s.toLowerCase().startsWith(r.toLowerCase())) s = s.slice(r.length)
+  return s.replace(/^(\.\/)+/, '')
+}
+
+/**
+ * Distil ONE listed file ({path, abs, bytes, mtime}) into the store.
+ * Returns { reused, record }, or null when the file is binary/unreadable.
+ * The two arms are byte-identical to the pre-0.2 indexCorpus loop bodies.
+ */
+export function distilFile(store, f, { force = false } = {}) {
+  let buf
+  try { buf = fs.readFileSync(f.abs) } catch { return null }
+  if (looksBinary(buf)) return null
+  const text = buf.toString('utf8')
+  const contentHash = sha1(buf)
+  const lang = langOf(f.path)
+  const prev = store.getFile(f.path)
+  const prevPage = prev ? store.getPage(`file:${f.path}`) : null
+  const expectedVersion = filePageVersion(f.path, contentHash)
+  if (!force && prev && prev.content_hash === contentHash && prevPage && prevPage.version_hash === expectedVersion) {
+    // Unchanged content: reuse symbol rows, only refresh mtime/tokens if needed.
+    const symbols = store.symbolsForPage(`file:${f.path}`)
+    return {
+      reused: true,
+      record: {
         rel: f.path, lang, bytes: f.bytes, loc: prev.loc, contentHash, tokens: prev.tokens || estTokens(text),
         symbols: symbols.map((s) => ({ name: s.name, kind: s.kind, line: s.line, signature: s.signature })),
         imports: store.importsForFile(f.path),
         looksEsm: /\bimport\s|\bexport\s/.test(text.slice(0, 20000)), looksCjs: /\brequire\s*\(|module\.exports/.test(text.slice(0, 20000)),
-      })
-      continue
+      },
     }
-    readFiles++
-    const { symbols, imports } = extractSymbols(text, lang)
-    const loc = text.split('\n').length
-    const tokens = estTokens(text)
-    const page = renderFilePage({ rel: f.path, lang, loc, bytes: f.bytes, contentHash, symbols, imports })
-    store.upsertFile({ path: f.path, contentHash, bytes: f.bytes, loc, lang, mtime: f.mtime, tokens })
-    store.setSymbols(`file:${f.path}`, f.path, symbols)
-    store.setImports(`file:${f.path}`, f.path, imports)
-    store.upsertPage({
-      id: `file:${f.path}`, kind: `file:${lang}`, versionHash: filePageVersion(f.path, contentHash),
-      text: page.text, producer: 'extract', meta: { contentHash, loc, bytes: f.bytes }, symbols: symbols.slice(0, 60),
-      files: [{ path: f.path, contentHash, mtime: f.mtime, bytes: f.bytes }],
-    })
-    records.push({
+  }
+  const { symbols, imports } = extractSymbols(text, lang)
+  const loc = text.split('\n').length
+  const tokens = estTokens(text)
+  const page = renderFilePage({ rel: f.path, lang, loc, bytes: f.bytes, contentHash, symbols, imports })
+  const looksEsm = /\bimport\s|\bexport\s/.test(text) ? 1 : 0
+  const looksCjs = /\brequire\s*\(|module\.exports/.test(text) ? 1 : 0
+  store.upsertFile({ path: f.path, contentHash, bytes: f.bytes, loc, lang, mtime: f.mtime, tokens, looksEsm, looksCjs })
+  store.setSymbols(`file:${f.path}`, f.path, symbols)
+  store.setImports(`file:${f.path}`, f.path, imports)
+  store.upsertPage({
+    id: `file:${f.path}`, kind: `file:${lang}`, versionHash: filePageVersion(f.path, contentHash),
+    text: page.text, producer: 'extract', meta: { contentHash, loc, bytes: f.bytes }, symbols: symbols.slice(0, 60),
+    files: [{ path: f.path, contentHash, mtime: f.mtime, bytes: f.bytes }],
+  })
+  return {
+    reused: false,
+    record: {
       rel: f.path, lang, bytes: f.bytes, loc, contentHash, tokens,
       symbols, imports,
       looksEsm: /\bimport\s|\bexport\s/.test(text), looksCjs: /\brequire\s*\(|module\.exports/.test(text),
+    },
+  }
+}
+
+/**
+ * Reconstruct per-file records from the store alone (no disk reads) so the
+ * card/map/manifest can be rebuilt after an incremental update. Mirrors the
+ * reuse arm of distilFile; looksEsm/looksCjs come from the persisted columns
+ * (set at distil time), so the card's ESM/CJS conventions survive incremental
+ * rebuilds without re-reading files.
+ */
+export function buildRecordsFromStore(store) {
+  const records = []
+  for (const row of store.allFiles()) {
+    records.push({
+      rel: row.path, lang: row.lang, bytes: row.bytes, loc: row.loc, contentHash: row.content_hash, tokens: row.tokens || 0,
+      symbols: store.symbolsForPage(`file:${row.path}`).map((s) => ({ name: s.name, kind: s.kind, line: s.line, signature: s.signature })),
+      imports: store.importsForFile(row.path),
+      looksEsm: row.looks_esm === 1, looksCjs: row.looks_cjs === 1,
     })
   }
+  return records
+}
 
+/**
+ * Shared tail of every indexing path: rebuild project.card/map from the store,
+ * hash the Merkle manifest, record the project version and refresh meta.
+ */
+function finalizeIndex(store, { root, cardBudget = 700, mapBudget = 3500, t0 = performance.now() }) {
   const files = store.allFiles()
-  const info = readConfigInfo(root, files)
+  const records = buildRecordsFromStore(store)
+  const info = readConfigInfo(root, records) // records (not rows) so looksEsm/looksCjs are real
   const card = renderProjectCard({
     root, files, records, version: null, commands: info.commands, entrypoints: info.entrypoints,
     name: info.name, description: info.description, topLevel: topLevelLayout(files),
@@ -590,12 +640,78 @@ export function indexCorpus(store, { root, maxFiles = 4000, cardBudget = 700, ma
   store.setMeta('card_tokens', card.tokens)
 
   return {
-    root, source: listed.source, files: files.length, bytes: files.reduce((a, f) => a + f.bytes, 0),
+    files: files.length, bytes: files.reduce((a, f) => a + f.bytes, 0),
     loc: files.reduce((a, f) => a + f.loc, 0), fullTokens: files.reduce((a, f) => a + (f.tokens || 0), 0),
-    readFiles, reused, deleted, ignored: listed.ignored,
     card: { tokens: card.tokens, budget: cardBudget, truncated: card.truncated },
     map: { tokens: map.tokens, budget: mapBudget, truncated: map.truncated },
     version: versionHash, versionRecorded: rec.recorded, parent,
+  }
+}
+
+/**
+ * Incremental indexing: distil exactly `paths` (repo-relative or absolute;
+ * vanishing paths prune their page), then rebuild card/map/manifest from the
+ * store. Never lists the whole tree and never reads untouched files.
+ */
+export function indexFiles(store, { root, paths, cardBudget = 700, mapBudget = 3500 } = {}) {
+  const t0 = performance.now()
+  root = path.resolve(root)
+  const rules = readGitignore(root)
+  let readFiles = 0
+  let reused = 0
+  let deleted = 0
+  for (const raw of paths ?? []) {
+    const rel = relInside(root, raw)
+    if (!rel || !isIndexableRel(rel, { rules })) continue
+    const abs = path.join(root, rel)
+    let st
+    try { st = fs.statSync(abs) } catch {
+      if (store.getFile(rel)) { store.deleteFile(rel); deleted++ }
+      continue
+    }
+    if (!st.isFile() || st.size > MAX_FILE_BYTES) continue
+    const out = distilFile(store, { path: rel, abs, bytes: st.size, mtime: Math.floor(st.mtimeMs) })
+    if (!out) continue
+    if (out.reused) reused++
+    else readFiles++
+  }
+  const env = finalizeIndex(store, { root, cardBudget, mapBudget, t0 })
+  return {
+    root, source: 'files', ...env, readFiles, reused, deleted, ignored: 0,
+    elapsedMs: Math.round(performance.now() - t0),
+  }
+}
+
+/**
+ * Distil `root` into the store. Deterministic; idempotent (same tree => same
+ * project version). Returns statistics including the new project version hash.
+ */
+export function indexCorpus(store, { root, maxFiles = 4000, cardBudget = 700, mapBudget = 3500, useGit = true, force = false, ignore = [] } = {}) {
+  const t0 = performance.now()
+  root = path.resolve(root)
+  const listed = listFiles(root, { maxFiles, useGit, ignore })
+  const records = []
+  let readFiles = 0
+  let reused = 0
+  let deleted = 0
+
+  // Files that vanished from the tree disappear from the index.
+  const seen = new Set(listed.files.map((f) => f.path))
+  for (const row of store.allFiles()) {
+    if (!seen.has(row.path)) { store.deleteFile(row.path); deleted++ }
+  }
+
+  for (const f of listed.files) {
+    const out = distilFile(store, f, { force })
+    if (!out) continue
+    if (out.reused) reused++
+    else readFiles++
+    records.push(out.record)
+  }
+
+  const env = finalizeIndex(store, { root, cardBudget, mapBudget, t0 })
+  return {
+    root, source: listed.source, ...env, readFiles, reused, deleted, ignored: listed.ignored,
     elapsedMs: Math.round(performance.now() - t0),
   }
 }
