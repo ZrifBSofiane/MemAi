@@ -435,3 +435,32 @@ appends versions; secrets never land in pages.
 Metrics to log per session: `prefix_hash`, `cache_hit_tokens`,
 `cache_miss_tokens`, prompt tokens attributable to tool results, pages faulted,
 bytes shared vs unique, handoff payload tokens, `$`.
+
+## 12. Freshness (0.2.0)
+
+An index is a cache, and the 0.1.x design left cache invalidation to model
+discipline — the one mechanism known to fail under load. 0.2.0 splits the
+problem in two and solves each mechanically:
+
+1. **Detect staleness (serve time).** Every serving command compares the store
+   against disk before answering: content hash for single file pages, a
+   stat-only mtime+size sweep for card/map. Replies carry `stale` and the text
+   carries `[STALE]` markers, so a stale page is a *known* stale page — the
+   reader can downgrade it to a navigation hint instead of trusting it.
+2. **Prevent staleness (index time).** Two automation paths share one
+   incremental core (`indexFiles`):
+   - `memai hook index` (PostToolUse) — synchronous single-file distil after
+     every agent edit; the file path picks its own project by walking up.
+   - `memai watch` — a resident daemon over `fs.watch` for everything agents
+     do not see (IDE edits, git operations, teammates). Events coalesce under
+     an 800 ms debounce; bursts >50 paths degrade to one full pass, whose
+     reuse path is already O(changed).
+
+   Both are wired by `memai init` for hosts that support hooks (ZCode,
+   Claude Code); `memai index` remains the manual fallback.
+
+The same release makes retrieval failure measurable instead of invisible:
+`query --rg` unions a ripgrep body sweep with the ranked index hits (the
+signature-only index and the body-level grep cover each other's failure
+modes), and `memai miss` records every time the index lost to a dumber tool,
+so per-repo recall becomes a number instead of a feeling.

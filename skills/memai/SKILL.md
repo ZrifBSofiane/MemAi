@@ -67,15 +67,26 @@ not, use the tool. Do not mix two stores.
 
 ## Pitfalls
 
-- **Stale index.** Pages and line numbers come from the last `index`. After edits, checkouts or
-  branch switches, run `{"op":"index"}` / `memai index` before trusting `get`/`query`; for a
-  precise line range prefer `fault path:line`, which reads the current file.
+- **Stale index.** Pages and line numbers come from the last `index`. From 0.2.0 every serving
+  command self-checks: replies carry a `stale` field and `[STALE]` markers when the file changed
+  on disk — treat those pages as navigation hints, not truth. Re-index mechanically instead of
+  memorizing it: `memai hook index` (PostToolUse, fires after every agent edit) and the resident
+  `memai watch --ensure` daemon cover agent and external edits; `{"op":"index"}` remains the
+  manual fallback. For a precise line range prefer `fault path:line`, which reads the current file.
+- **Bodies are not in the index.** File pages carry signatures; body-only strings (error messages,
+  literals) are invisible to `query`. Use `query --rg` (`"rg": true`) to union a ripgrep sweep
+  over file bodies — the ground-truth net for content the index does not page.
+- **Retrieval misses.** When a lookup fails here but succeeds elsewhere (grep, manual), record it:
+  `memai miss "<query>" --found-by rg --path <where>`; `miss --stats` shows per-repo recall gaps.
 - **No store.** `card`, `get` and `diff` fail until `memai init` (or `{"op":"index"}`) has run.
-  Run the init once in the repository root; it is local and idempotent.
+  Run the init once in the repository root; it is local and idempotent. `--read-only` serves an
+  existing store without ever creating one.
 - **Wrong root.** If the tool reports a store from another directory, set `MEMAI_ROOT` or pass
   `--root`. MCP servers should be started from the project root.
 - **Whole-file reads despite a fault.** Do not fall back to reading the file before trying
-  `fault`; try the symbol first, then read only if the slice was truncated or insufficient.
+  `fault`; try the symbol first (`fault --deep` adds callees/callers in one call), then read only
+  if the slice was truncated or insufficient — fault replies carry `line`+`lineEnd`, so read
+  exactly that range.
 - **Repeated orientation.** Do not call `card`, `status` or `inbox` in a loop or per step; they
   are once-per-session operations.
 - **Large repos.** `map` is the most expensive page; prefer `query` when you can name the target.
