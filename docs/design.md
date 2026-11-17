@@ -464,3 +464,31 @@ The same release makes retrieval failure measurable instead of invisible:
 signature-only index and the body-level grep cover each other's failure
 modes), and `memai miss` records every time the index lost to a dumber tool,
 so per-repo recall becomes a number instead of a feeling.
+
+
+## 13. Navigation, evaluation, handoffs (0.3.0)
+
+Three capabilities that fall out of data the store already holds, at 0 token cost:
+
+- **`graph`** — the `imports` table was collected from day one and never
+  exposed. `memai graph <path|symbol>` resolves relative specifiers against
+  the indexed file set, reports forward and reverse edges, walks transitive
+  importer chains to `--depth`, and flags cycles. This is the dependency
+  half of "how is this called" that signatures cannot answer — the same
+  questions graphify's `affected`/`explain` target, answered from data we
+  already had (see `bench/GRAPHIFY.md` for the measured comparison).
+- **`eval`** — the miss log captures organic failures; `memai eval` adds the
+  systematic half: `{"q","expect"}` fixtures scored for recall@k and MRR per
+  mode (index vs hybrid). Every future extraction or retrieval change can now
+  prove it moved recall, per repository.
+- **`pack` / `checkpoint` / `diff --last`** — session handoffs were manual
+  assembly work. `checkpoint` stores the version an agent has read up to
+  (`index_meta`, no schema change); `diff --last` resumes from it; `pack`
+  assembles card + board notes + optional fault slices + the resume version
+  into one clamped page.
+
+Two operational hardenings ride along: `hook index` now defers to a live
+watcher instead of duplicating its work (and indexes directly when it is
+dead), and the watcher's flush scheduler holds backpressure past 30
+flushes/minute while events keep coalescing — both replace hope with
+arithmetic.

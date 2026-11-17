@@ -19,13 +19,13 @@ import { defaultAgent, isGranularTools, openProject, closeProject } from './path
 export const TOOL_NAME = 'mem'
 export const SERVER_NAME = 'memai-mcp'
 
-export const OPS = ['card', 'map', 'query', 'fault', 'get', 'diff', 'status', 'index', 'note', 'post', 'inbox', 'miss']
+export const OPS = ['card', 'map', 'query', 'fault', 'get', 'diff', 'status', 'index', 'note', 'post', 'inbox', 'miss', 'graph', 'pack']
 
 /** Ops that may create the store/db when it does not exist yet. */
 const WRITE_OPS = new Set(['index', 'note', 'post'])
 
 /** Per-op budget ceilings: one call must not be able to buy a huge context. */
-const MAX_BUDGET = { card: 1500, map: 3500, get: 4000, fault: 2500, query: 1200, diff: 1500, inbox: 2000 }
+const MAX_BUDGET = { card: 1500, map: 3500, get: 4000, fault: 2500, query: 1200, diff: 1500, inbox: 2000, graph: 1200, pack: 2500 }
 const DEFAULT_BUDGET = {
   card: DEFAULTS.card, map: DEFAULTS.map, get: DEFAULTS.get, fault: DEFAULTS.fault,
   query: DEFAULTS.query, diff: DEFAULTS.diff, inbox: 900,
@@ -69,7 +69,7 @@ function memInputSchema() {
       op: {
         type: 'string',
         enum: OPS,
-        description: 'Operation. card|map|status read pages; query+fault locate and fetch code; get reads one page; diff resumes since a version; index refreshes after edits; note/post/inbox share state with other agents; miss logs a retrieval failure.',
+        description: 'Operation. card|map|status read pages; query+fault locate and fetch code; graph navigates module dependencies; get reads one page; diff resumes since a version (checkpoint/last); index refreshes after edits; note/post/inbox share state with other agents; miss logs a retrieval failure; pack assembles a handoff bundle.',
       },
       budget: { type: 'integer', minimum: 1, maximum: 4000, description: 'Token budget for this response; defaults are tuned, pass a smaller budget for a cheap peek.' },
       maxFiles: { type: 'integer', minimum: 1, maximum: 100000, description: 'index: cap on indexed files.' },
@@ -77,11 +77,16 @@ function memInputSchema() {
       q: { type: 'string', description: 'query: search terms or a symbol name. miss: the query that failed.' },
       k: { type: 'integer', minimum: 1, maximum: 20, description: 'query: number of ranked hits (default 5).' },
       rg: { type: 'boolean', description: 'query: also union a ripgrep pass over file bodies (ground-truth net for content the index does not page).' },
-      target: { type: 'string', description: 'fault: symbol, path#symbol, path:line, or path.' },
       deep: { type: 'boolean', description: 'fault: append one-hop context (callees + best-effort callers).' },
       foundBy: { type: 'string', description: 'miss: which tool found it (rg | grep | manual).' },
       hitPath: { type: 'string', description: 'miss: where it was found (path or page id).' },
       stats: { type: 'boolean', description: 'miss: return miss stats instead of recording one.' },
+      depth: { type: 'integer', minimum: 1, maximum: 5, description: 'graph: transitive importer chain depth (default 1).' },
+      target: { type: 'string', description: 'fault: symbol, path#symbol, path:line, or path. graph: a path or symbol.' },
+      card: { type: 'boolean', description: 'pack: include the project card (default true).' },
+      faults: { type: 'string', description: 'pack: comma-separated symbols to include as short slices.' },
+      last: { type: 'boolean', description: 'diff: diff since the last checkpoint for your agent (use diff checkpoint:true first).' },
+      checkpoint: { type: 'boolean', description: 'diff: record the current version for your agent so a later last:true can resume.' },
       pageId: { type: 'string', description: 'get: file:<path> | project.card | project.map | board:<topic>.' },
       since: { type: 'string', description: 'diff: previous project version hash; omit to just see the current version.' },
       topic: { type: 'string', description: 'note/post/inbox: board topic (e.g. handoff, review:auth).' },
@@ -165,6 +170,16 @@ const granularSpec = [
     name: 'mem_miss', op: 'miss', title: 'MemAi: log a retrieval miss',
     description: 'Record that a lookup failed here and what found it instead (rg/grep/manual); stats: true returns the per-repo miss counts. Use it right after you fell back to grep — that is how recall gaps become visible and fixable.',
     inputSchema: { type: 'object', properties: { q: { type: 'string' }, foundBy: { type: 'string' }, hitPath: { type: 'string' }, agent: { type: 'string' }, stats: { type: 'boolean' }, budget: { type: 'integer', minimum: 1, maximum: 1200 } }, additionalProperties: false },
+  },
+  {
+    name: 'mem_graph', op: 'graph', title: 'MemAi: module dependency graph',
+    description: 'Import navigation from the stored imports table (~100 tokens): what a path/symbol imports, what imports it, transitive importer chains and cycles. Use for "what breaks if this changes" and dependency questions; depth > 1 for chains.',
+    inputSchema: { type: 'object', properties: { target: { type: 'string' }, depth: { type: 'integer', minimum: 1, maximum: 5 }, budget: { type: 'integer', minimum: 1, maximum: 1200 } }, required: ['target'], additionalProperties: false },
+  },
+  {
+    name: 'mem_pack', op: 'pack', title: 'MemAi: handoff bundle',
+    description: 'Assemble a budgeted handoff page: project card + board notes + optional fault slices + the version to diff --since on resume. Use at session end to hand work to the next agent in one page.',
+    inputSchema: { type: 'object', properties: { topic: { type: 'string' }, card: { type: 'boolean' }, faults: { type: 'string' }, agent: { type: 'string' }, budget: { type: 'integer', minimum: 1, maximum: 2500 } }, additionalProperties: false },
   },
 ]
 
@@ -255,8 +270,17 @@ export async function dispatch({ root = null, db = null, env = process.env, cwd 
         return toToolResult(op, pages.map({ budget: budgetFor('map', args) }))
       case 'status':
         return toToolResult(op, pages.status())
-      case 'diff':
-        return toToolResult(op, pages.diff({ since: str(args.since) || null, budget: budgetFor('diff', args) }))
+      case 'diff': {
+        if (args.checkpoint) return toToolResult(op, pages.checkpoint(str(args.agent) || defaultAgent(env)))
+        return toToolResult(op, pages.diff({ since: str(args.since) || null, budget: budgetFor('diff', args), last: !!args.last, agent: str(args.agent) || defaultAgent(env) }))
+      }
+      case 'graph': {
+        const target = str(args.target)
+        if (!target) return errorResult(op, 'graph requires target (a path or symbol)')
+        return toToolResult(op, pages.graph(target, { depth: clampInt(args.depth, 1, 1, 5), budget: budgetFor('graph', args) }))
+      }
+      case 'pack':
+        return toToolResult(op, pages.pack(str(args.topic) || 'handoff', { budget: budgetFor('pack', args), faults: args.faults ? [str(args.faults)] : [], card: args.card !== false, agent: str(args.agent) || defaultAgent(env) }))
       case 'get': {
         const pageId = str(args.pageId)
         if (!pageId) return errorResult(op, 'get requires pageId (file:<path> | project.card | project.map | board:<topic>)')

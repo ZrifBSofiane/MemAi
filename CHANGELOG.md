@@ -4,6 +4,51 @@ All notable changes to this project are documented here. The format is loosely
 based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the
 project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] — 2026-11-17
+
+Navigation, evaluation, handoffs — and the index stops being the only map.
+
+### Added
+
+- **`memai graph <path|symbol> [--depth N]`** — module dependency navigation
+  from the `imports` table the index always collected but never exposed: what
+  a file imports (internal + external markers), what imports it (reverse
+  edges), transitive importer chains, and cycles. Extensionless specifiers
+  (`./b`) resolve against the indexed file set. ~100 tokens.
+- **`memai checkpoint [--agent A]` / `memai diff --last [--agent A]`** — record
+  the version you have read up to; resume with a delta instead of hunting for
+  the hash. Per-agent, stored in `index_meta` (no schema change).
+- **`memai pack [topic] [--fault "a,b"] [--no-card]`** — budgeted handoff
+  bundle: project card + board notes + optional fault slices + the exact
+  `diff --since` version for the next session. One clamped page.
+- **`memai eval [--fixtures FILE] [--k N] [--modes index,hybrid]`** — retrieval
+  quality harness: recall@k and MRR per mode over `{"q","expect"}` fixtures
+  (default `.memai/eval.json`), listing misses. Recall stops being a feeling.
+- **`status` freshness line** — "freshness: fresh (75 files)" or "3 changed,
+  1 missing of 75 — re-run index": automation health at a glance (stat-only
+  sweep, honors `--no-stale`).
+- **Hook↔watcher dedup** — when the resident watcher is alive, `hook index`
+  defers to it (it distils within its debounce window anyway); without a
+  watcher the hook indexes directly. Self-healing either way.
+- **Watcher circuit breaker** — above 30 flushes/minute, event flushes hold
+  until the window clears while events keep coalescing; nothing is lost, the
+  watcher just stops thrashing under pathological writers.
+- **`fault --deep` callers now include body-level call sites** — remaining
+  slots are filled by a ripgrep sweep, capturing dynamic imports and
+  method-body calls that declaration signatures never contain.
+- **MCP surface** — `graph` and `pack` ops (`mem_graph`, `mem_pack` granular
+  tools); `diff` accepts `checkpoint`/`last`/`agent`.
+
+### Fixed
+
+- Nothing new; 0.2.1 (budget-collapse) carried this in.
+
+### Docs
+
+- `bench/GRAPHIFY.md`: measured head-to-head against graphify 0.9.34 on this
+  repository (per-session overhead, build coverage, query economy), summarized
+  in the README.
+
 ## [0.2.1] — 2026-11-17
 
 ### Fixed

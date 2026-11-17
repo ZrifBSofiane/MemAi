@@ -49,6 +49,10 @@ Usage:
   memai index [--max-files N] [--force]   Distil the repo into pages (local, 0 model tokens).
   memai status|card|map|diff|get|query|fault|note|post|inbox|agents|edit|merge ...
                                   Core paging commands (JSON on stdout, tokens on every reply).
+  memai graph <path|sym> [--depth N]      Module dependency navigation (importers/imports/chains/cycles).
+  memai pack [topic] [--fault "a,b"]      Budgeted handoff bundle for the next session.
+  memai eval [--fixtures FILE] [--k N]    Retrieval quality harness (recall@k / MRR per mode).
+  memai checkpoint [--agent A]            Save the current version; diff --last resumes from it.
   memai help                      This help.
 
 Global: --root DIR  --db FILE  --text  --cpt N   (env: MEMAI_ROOT, MEMAI_DB, MEMAI_AGENT)

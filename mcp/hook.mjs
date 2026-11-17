@@ -20,6 +20,7 @@ import { openProject, closeProject, nearestProjectRoot, resolveDb } from './path
 import { estTokens } from '../src/tokens.mjs'
 import { MemoryStore } from '../src/store.mjs'
 import { MemoryPages } from '../src/page.mjs'
+import { watcherAlive } from '../src/watch.mjs'
 
 export const HOOK_EVENTS = ['SessionStart', 'SubagentStart']
 
@@ -80,6 +81,11 @@ export async function hookIndexFile({ payload = null, root = null, db = null, en
   const projectRoot = root ? path.resolve(root) : nearestProjectRoot(path.dirname(abs))
   const dbPath = resolveDb(projectRoot, { db, env })
   if (!fs.existsSync(dbPath)) return { ok: true, indexed: false, reason: `no store at ${dbPath}` }
+  // Dedup: when the resident watcher is alive it distils this file within its
+  // debounce window anyway — skip the duplicate work (and the ~300ms node spawn
+  // cost lands only on sessions without the daemon).
+  const watcherPid = watcherAlive(projectRoot)
+  if (watcherPid) return { ok: true, indexed: false, skipped: true, reason: `watcher alive (pid ${watcherPid}) — daemon will index this file` }
   const store = new MemoryStore({ dbPath, root: projectRoot })
   try {
     const pages = new MemoryPages({ store, root: projectRoot })

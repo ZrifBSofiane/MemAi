@@ -51,6 +51,25 @@ function readPidFile(root) {
   try { return JSON.parse(fs.readFileSync(pidPath(root), 'utf8')) } catch { return null }
 }
 
+/** Pid of the live watcher for a project root, or null. Used by `hook index`
+ * to skip its own indexing when the daemon will handle the file anyway. */
+export function watcherAlive(root) {
+  const pid = readPidFile(root)
+  return pid && alive(pid.pid) ? pid.pid : null
+}
+
+/**
+ * Pure backpressure decision: normally flush after `debounceMs`, but once more
+ * than `maxPerMinute` flushes happened inside `windowMs`, hold until the oldest
+ * flush leaves the window. Events keep coalescing meanwhile, so nothing is
+ * lost — the watcher just stops thrashing under pathological writers.
+ */
+export function flushDelayMs(now, recentFlushTimes, { maxPerMinute = 30, windowMs = 60000, debounceMs = DEBOUNCE_MS } = {}) {
+  const within = recentFlushTimes.filter((t) => now - t < windowMs)
+  if (within.length < maxPerMinute) return debounceMs
+  return Math.max(debounceMs, within[0] + windowMs - now)
+}
+
 function logLine(root, msg) {
   try {
     const p = logPath(root)
@@ -182,6 +201,8 @@ function startWatcher({ root, dbPath, detach = false, debounceMs = DEBOUNCE_MS }
     const pending = new Map()
     let chain = Promise.resolve() // serialises flushes: SQLite writes must not overlap
     let timer = null
+    const flushTimes = [] // recent flush starts, for the circuit breaker
+    let breakerLogged = false
 
     const writePidFile = () => fs.writeFileSync(pidFile, JSON.stringify({ pid: process.pid, started_at: Date.now(), root }))
 
@@ -199,6 +220,8 @@ function startWatcher({ root, dbPath, detach = false, debounceMs = DEBOUNCE_MS }
       if (!pending.size || stopped) return
       const paths = [...pending.keys()]
       pending.clear()
+      flushTimes.push(Date.now())
+      while (flushTimes.length > 64) flushTimes.shift()
       chain = chain.then(async () => {
         if (stopped) return
         const plan = planBatch(paths)
@@ -216,8 +239,14 @@ function startWatcher({ root, dbPath, detach = false, debounceMs = DEBOUNCE_MS }
       })
     }
     const schedule = () => {
+      const now = Date.now()
+      const delay = flushDelayMs(now, flushTimes, { debounceMs })
+      if (delay > debounceMs && !breakerLogged) {
+        breakerLogged = true
+        logLine(root, `circuit breaker: >flush budget in the last minute — holding events (they keep coalescing), next flush in ~${Math.round(delay / 1000)}s`)
+      } else if (delay <= debounceMs) breakerLogged = false
       if (timer) clearTimeout(timer)
-      timer = setTimeout(flush, debounceMs)
+      timer = setTimeout(flush, delay)
     }
 
     let done = (payload) => { cleanup(); resolveDone(payload) }
