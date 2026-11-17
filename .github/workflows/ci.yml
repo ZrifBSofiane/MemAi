@@ -15,14 +15,21 @@ concurrency:
 
 jobs:
   test:
-    name: test (Node ${{ matrix.node }})
-    runs-on: ubuntu-latest
+    name: test (${{ matrix.os }}, Node ${{ matrix.node }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
         # node:sqlite (used by the store) ships from Node 22.13; Node 20 has no
-        # such module, so the supported matrix starts at 22.
+        # such module, so the supported matrix starts at 22. Windows is in the
+        # matrix on purpose: the fs.watch surfaces (watcher/pidfile tests) and
+        # rg spawning behave differently across platforms.
+        os: [ubuntu-latest, windows-latest]
         node: [22, 24]
+    defaults:
+      run:
+        shell: bash # one shell on both OSes, so unix-isms below just work
     steps:
       - uses: actions/checkout@v4
 
@@ -35,6 +42,18 @@ jobs:
           node --version
           test ! -d node_modules
           test ! -f package-lock.json
+
+      # The suite exercises the hybrid sweep and asserts rg hits, so ripgrep
+      # must be on PATH — runners don't ship it (windows never has; ubuntu
+      # images dropped it, which is exactly what the rg tests caught).
+      - name: Install ripgrep (linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y ripgrep
+      - name: Install ripgrep (windows)
+        if: runner.os == 'Windows'
+        run: choco install ripgrep -y --no-progress
+      - name: ripgrep on PATH
+        run: rg --version
 
       - name: Self-test (store, paging, budgets, diff, merge)
         run: node bench/selftest.mjs
@@ -49,3 +68,9 @@ jobs:
 
       - name: MCP handshake probe (live JSON-RPC over stdio)
         run: node scripts/mcp-probe.mjs
+
+      - name: Eval smoke (index + shipped fixtures, recall floor 0.75)
+        # The published eval number, verified per PR instead of per memory.
+        # Floor is the 0.3.0 shortlist target, not 1.0 — headroom for runner
+        # variance, still fails on real regressions.
+        run: node scripts/eval-smoke.mjs 0.75

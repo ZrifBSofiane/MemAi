@@ -11,11 +11,12 @@ the hybrid sweep was broken, and the index ranked by substring luck.
 
 ### Added
 
-- **GitHub Actions CI** — `npm test` + an eval smoke (`index` → shipped
-  fixtures → recall floor 0.75) on ubuntu and windows. The two OSes matter:
-  the watcher/pidfile tests exercise `fs.watch` and rg spawns that behave
-  differently across platforms, and CI keeps the eval number honest for every
-  future PR.
+- **CI covers Windows and retrieval quality** — the existing CI matrix gains
+  `windows-latest` (the watcher/pidfile tests exercise `fs.watch` and rg
+  spawning, which behave differently across platforms) and an eval smoke:
+  `index` → shipped fixtures → recall floor 0.75 per PR. Runners don't ship
+  ripgrep (ubuntu images dropped it — the rg tests caught that on the first
+  CI run), so both OSes install it explicitly.
 
 ### Fixed
 
