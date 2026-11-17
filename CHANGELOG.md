@@ -9,6 +9,14 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 The retrieval sprint: 50% → 100% recall@5 on the shipped fixtures — because
 the hybrid sweep was broken, and the index ranked by substring luck.
 
+### Added
+
+- **GitHub Actions CI** — `npm test` + an eval smoke (`index` → shipped
+  fixtures → recall floor 0.75) on ubuntu and windows. The two OSes matter:
+  the watcher/pidfile tests exercise `fs.watch` and rg spawns that behave
+  differently across platforms, and CI keeps the eval number honest for every
+  future PR.
+
 ### Fixed
 
 - **`query --rg` searched only the first term of every multi-word query.**

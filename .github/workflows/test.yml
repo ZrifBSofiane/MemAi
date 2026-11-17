@@ -1,0 +1,47 @@
+name: test
+
+# Tests + eval smoke on both OSes: the fs.watch surfaces (watcher/pidfile
+# tests) and line-ending handling differ between Linux and Windows.
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22 # >= 22.13: the store uses the built-in node:sqlite
+
+      # The suite exercises the hybrid sweep and asserts rg hits, so ripgrep
+      # must be on PATH (windows-latest does not ship it).
+      - name: Install ripgrep (linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y ripgrep
+      - name: Install ripgrep (windows)
+        if: runner.os == 'Windows'
+        run: choco install ripgrep -y --no-progress
+      - name: ripgrep on PATH
+        run: rg --version
+
+      - name: Tests
+        run: npm test
+
+      - name: Eval smoke (index + fixtures, recall floor)
+        run: node scripts/eval-smoke.mjs 0.75
