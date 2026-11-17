@@ -27,6 +27,19 @@ export const DEFAULTS = {
 }
 export const PAGE_KINDS = ['project.card', 'project.map', 'file:<path>', 'board:<topic>']
 
+/** File-name boost: a query term that names the file is strong file-level
+ *  evidence (exact basename token > prefix, e.g. `watcher` ~ `watch.mjs`). */
+function pathBoost(p, terms) {
+  if (!p || !terms?.length) return 0
+  const stem = String(p).replace(/.*\//, '').toLowerCase().replace(/\.[a-z0-9]+$/, '')
+  const tokens = stem.split(/[^a-z0-9_$]+/).filter(Boolean)
+  for (const t of terms) {
+    if (tokens.includes(t)) return 3
+    if (t.length >= 4 && tokens.some((k) => k.startsWith(t) || t.startsWith(k))) return 2
+  }
+  return 0
+}
+
 const fitWithHeader = (bodyText, budget, makeHeader) => {
   // Reserve header tokens by iterating: clamp body, build header, check total.
   // clampText cuts on line boundaries (~5-15 tokens of granularity), so the
@@ -389,19 +402,36 @@ export class MemoryPages {
     const terms = String(q).toLowerCase().split(/[^a-z0-9_$]+/i).filter((t) => t.length >= 2).slice(0, 6)
     if (!terms.length) return { hits: [], note: null }
     const rootPosix = String(this.root).replace(/\\/g, '/').replace(/\/+$/, '') + '/'
+    // One -e per term: a bare spread (`-e a b c`) leaves terms[1..] as PATH
+    // arguments — rg exits 2 having searched only terms[0], and --no-messages
+    // silences the "cannot find the file" complaint.
+    const args = ['--json', '--max-count', '8', '--smart-case', '--no-messages',
+      ...terms.flatMap((t) => ['-e', t]), this.root]
     let raw = ''
-    try {
-      raw = execFileSync('rg', ['--json', '--max-count', '3', '--smart-case', '--no-messages', '-e', ...terms, this.root], { encoding: 'utf8', maxBuffer: 8 * 1024 * 1024, timeout: timeoutMs })
-    } catch (err) {
-      if (err?.code === 'ENOENT') return { hits: [], note: 'rg: unavailable' }
-      if (err?.killed || err?.signal) return { hits: [], note: 'rg: timed out' }
-      // exit 1 = no matches; exit 2+ = some file was unreadable (AV lock, perms)
-      // but stdout still carries every match found before that. Take them.
-      raw = err?.stdout ?? ''
-      if (!raw) return { hits: [], note: `rg: failed (${err?.status ?? 'unknown'})` }
+    let partial = false
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        raw = execFileSync('rg', args, { encoding: 'utf8', maxBuffer: 8 * 1024 * 1024, timeout: timeoutMs })
+        partial = false
+        break
+      } catch (err) {
+        if (err?.code === 'ENOENT') return { hits: [], note: 'rg: unavailable' }
+        if (err?.killed || err?.signal) return { hits: [], note: 'rg: timed out' }
+        // exit 1 = no matches anywhere (clean); exit 2+ = some file was
+        // unreadable (AV lock, perms) — stdout still carries every match found
+        // before that. Windows AV locks are transient, so retry once before
+        // settling for a partial scan (rarity counts want the whole pool).
+        if (err?.status === 1) return { hits: [], note: null }
+        raw = err?.stdout ?? ''
+        partial = true
+        if (!raw) return { hits: [], note: `rg: failed (${err?.status ?? 'unknown'})` }
+      }
     }
     const hits = []
     const seen = new Set()
+    const perFile = new Map() // rel -> pooled lines (keep file diversity in the pool)
+    const lineDf = new Map() // term -> matched lines carrying it (the rarity prior)
+    const pool = []
     for (const line of raw.split('\n')) {
       if (!line.startsWith('{')) continue
       let m
@@ -414,18 +444,36 @@ export class MemoryPages {
       const key = `${rel}:${m.data.line_number}`
       if (seen.has(key)) continue
       seen.add(key)
-      hits.push({
-        pageId: `file:${rel}`, kind: 'text', path: rel, symbol: null, line: m.data.line_number,
-        snippet: String(m.data.lines?.text ?? '').trim().slice(0, 140), score: 0.5, source: 'rg',
-      })
-      if (hits.length >= cap) break
+      if ((perFile.get(rel) ?? 0) >= 4) continue
+      const text = String(m.data.lines?.text ?? '')
+      const low = text.toLowerCase()
+      const matched = terms.filter((t) => low.includes(t))
+      if (!matched.length) continue
+      for (const t of matched) lineDf.set(t, (lineDf.get(t) ?? 0) + 1)
+      pool.push({ rel, line: m.data.line_number, text, matched })
+      perFile.set(rel, (perFile.get(rel) ?? 0) + 1)
+      if (pool.length >= 400) break
     }
-    return { hits, note: null }
+    // Rarity-first cap: pool every match, then let lines matching more distinct
+    // (and rarer) terms win the slots, so a generic term like `index` cannot
+    // flood the cap before the rare term's file surfaces.
+    const weight = (t) => 1 / Math.log(1 + (lineDf.get(t) ?? 1))
+    const ranked = pool
+      .map((p) => ({
+        pageId: `file:${p.rel}`, kind: 'text', path: p.rel, symbol: null, line: p.line,
+        snippet: p.text.trim().slice(0, 140), source: 'rg',
+        score: Math.round(p.matched.reduce((s, t) => s + weight(t), 0) * 1000) / 1000,
+      }))
+      .sort((a, b) => b.score - a.score || a.path.length - b.path.length || a.path.localeCompare(b.path) || a.line - b.line)
+    hits.push(...ranked.slice(0, cap))
+    return { hits, note: partial ? 'rg: partial scan (some files unreadable)' : null }
   }
 
-  /** Ranked, compact hits: symbol rows first, then page-text FTS hits; `--rg` unions a body sweep. */
+  /** Ranked, compact hits: IDF-weighted symbols, FTS pages and (with `--rg`)
+   *  body lines all compete in one score-sorted pool, so rare-term evidence can
+   *  surface a file the index alone buried. */
   query(q, { k = 5, budget = DEFAULTS.query, kind = null, rg = false } = {}) {
-    const ident = /^[A-Za-z_$][\w$.:-]*$/.test(q.trim())
+    const terms = String(q).toLowerCase().split(/[^a-z0-9_$]+/i).filter((t) => t.length >= 2).slice(0, 6)
     const hits = []
     const seen = new Set()
     const push = (h) => {
@@ -440,23 +488,27 @@ export class MemoryPages {
     for (const p of this.store.searchPages(q, { limit: k * 2 })) {
       if (kind && !p.pageId.startsWith(kind)) continue
       if (p.pageId.startsWith('file:')) {
-        push({ pageId: p.pageId, kind: 'page', path: p.path, symbol: null, line: null, snippet: p.snippet, score: 1 })
+        push({ pageId: p.pageId, kind: 'page', path: p.path, symbol: null, line: null, snippet: p.snippet, score: Math.round((1 + pathBoost(p.path, terms)) * 1000) / 1000 })
       }
     }
-    let top = hits.slice(0, k)
     let rgNote = null
     if (rg) {
       const extra = this._rgSearch(q, { cap: 5 })
       rgNote = extra.note
-      const seenLines = new Set(top.map((h) => `${h.path}:${h.line}`))
+      const seenLines = new Set(hits.filter((h) => h.line).map((h) => `${h.path}:${h.line}`))
       for (const h of extra.hits) {
         const key = `${h.path}:${h.line}`
         if (seenLines.has(key)) continue
         seenLines.add(key)
-        top.push(h)
+        // Append directly — `push` dedupes on pageId|symbol, which would
+        // collapse multiple matched lines from the same file into one.
+        hits.push({ ...h, score: Math.round((h.score + pathBoost(h.path, terms)) * 1000) / 1000 })
       }
     }
-    top = top.slice(0, k + (rg ? 5 : 0))
+    // One ranked pool with deterministic tie-breaks (score, shorter path, path,
+    // line): generic floods can no longer crowd out the right file before rank k.
+    hits.sort((a, b) => b.score - a.score || (a.path?.length ?? 0) - (b.path?.length ?? 0) || (a.path ?? '').localeCompare(b.path ?? '') || (a.line ?? 0) - (b.line ?? 0))
+    const top = hits.slice(0, k + (rg ? 5 : 0))
     if (this.staleCheck !== false) {
       for (const h of top) {
         if (!h.path) continue
