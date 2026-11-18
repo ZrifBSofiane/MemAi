@@ -1,10 +1,10 @@
 ---
 name: memai
-description: Use MemAi's paged memory in a repository with a .memai store instead of re-reading files. Trigger for orientation (stack, build/test commands, entrypoints), locating a symbol or feature, reading one function body or line range, or resuming after edits in a new session. Skip it for a single small file (under ~1.3 KB): a plain read is cheaper.
+description: Use MemAi's paged memory in a repository with a .memai store instead of re-reading files. Trigger for orientation (stack, build/test commands, entrypoints), locating a symbol or feature, reading one function body or line range, dependency or blast-radius questions (what imports this, what breaks if it changes, shortest import path), or resuming after edits in a new session. Skip it for a single small file (under ~1.3 KB): a plain read is cheaper.
 license: MIT
 compatibility: Requires a project with a MemAi store (`memai init`, Node >= 22.13) and either the `mem` MCP tool or the `memai` CLI on PATH. Local-only; no network. Works in Agent Skills clients including Claude Code, OpenCode, Codex, ZCode, DSH and generic SKILL.md hosts.
 metadata:
-  version: "0.1.1"
+  version: "0.4.0"
   docs: https://github.com/ZrifBSofiane/MemAi
   pager: .memai/mem.db
 ---
@@ -27,6 +27,10 @@ the alternative is reading whole files into context.
 - You need dependency answers ("what breaks if this changes", "who uses this module"): use
   `{"op":"graph","target":"<path|symbol>","depth":2}` (CLI `memai graph`) — importers, imports,
   transitive chains and cycles from the stored imports table. No body reads.
+- You need the blast radius or a route between files: `{"op":"affected","target":"<path|symbol>"}`
+  (CLI `memai affected`) lists every file that transitively imports the target with hop counts;
+  `{"op":"graph","target":"<a>","target2":"<b>"}` (CLI `memai graph --shortest a b`) returns the
+  BFS shortest import path between two files or symbols. Endpoints can be symbol names.
 - You are handing work to the next agent: assemble one budgeted page with
   `{"op":"pack","topic":"handoff"}` (CLI `memai pack`) — card + board notes + resume version.
   Optionally `--fault "sym1,sym2"` for small slices of hot code.
@@ -68,7 +72,7 @@ not, use the tool. Do not mix two stores.
 ## Budget discipline
 
 - Every reply starts with a token count and is clamped to a budget.
-- Defaults are tuned: card 700, map 3500, get 1200, fault 600, query 400, diff 600, inbox 900, graph 500, pack 1500.
+- Defaults are tuned: card 700, map 3500, get 1200, fault 600, query 400, diff 600, inbox 900, graph 500, affected 500, pack 1500.
 - Lower a budget (`"budget": 300`, `--budget 300`) for a cheap peek; raise it only when the
   previous page was truncated and the rest is genuinely needed.
 - Prefer one larger `fault` over many tiny `query` calls. Stop when the question is answered.
@@ -76,7 +80,7 @@ not, use the tool. Do not mix two stores.
 
 ## Pitfalls
 
-- **Stale index.** Pages and line numbers come from the last `index`. From 0.2.0 every serving
+- **Stale index.** Pages and line numbers come from the last `index`. Every serving
   command self-checks: replies carry a `stale` field and `[STALE]` markers when the file changed
   on disk — treat those pages as navigation hints, not truth. Re-index mechanically instead of
   memorizing it: `memai hook index` (PostToolUse, fires after every agent edit) and the resident
