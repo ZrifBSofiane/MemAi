@@ -304,19 +304,45 @@ export class MemoryStore {
     const ins = this.stmt('INSERT OR IGNORE INTO imports(page_id, path, module) VALUES (?,?,?)')
     for (const m of modules) ins.run(pageId, p, m)
   }
-  /** Ranked symbol lookup: exact name, prefix, then substring. Non-test first. */
+  /** Ranked symbol lookup, per-term: a multi-word query unions each word's
+   *  exact/prefix/substring matches, each bonus weighted by how rare the term
+   *  is across symbol names (IDF), so a generic-term prefix cannot outrank
+   *  evidence about a rare term. Symbols matching more (and tighter) terms
+   *  score higher. Non-test first. */
   symbolSearch(q, { limit = 8 } = {}) {
-    const lq = q.toLowerCase()
-    const rows = this.all(
-      `SELECT name, kind, path, line, signature,
-              CASE WHEN lname = ? THEN 0 WHEN lname LIKE ? ESCAPE '\\' THEN 1 ELSE 2 END AS rank
-       FROM symbols WHERE lname LIKE ? ESCAPE '\\' ORDER BY rank, length(path), path, line LIMIT 200`,
-      lq, `${escapeLike(lq)}%`, `%${escapeLike(lq)}%`
-    )
-    const scored = rows.map((r) => ({
-      ...r,
-      score: (r.rank === 0 ? 4 : r.rank === 1 ? 3 : 1) + (/(^|\/)test|\.test\.|spec\./i.test(r.path) ? -1 : 0),
-    })).sort((a, b) => b.score - a.score || a.path.length - b.path.length || a.path.localeCompare(b.path) || a.line - b.line)
+    // Single-term queries keep 1-char identifiers (fault/graph symbol targets
+    // like `c`); multi-term queries drop 1-char noise words.
+    const parts = String(q).toLowerCase().split(/[^a-z0-9_$]+/i).filter(Boolean)
+    const terms = (parts.length === 1 ? parts : parts.filter((t) => t.length >= 2)).slice(0, 6)
+    if (!terms.length) return []
+    const idf = new Map()
+    for (const t of terms) {
+      // df over identifier-like symbols only: md headings and test names are
+      // English prose whose word mentions would dilute real identifiers.
+      const row = this.one('SELECT COUNT(*) AS n FROM symbols WHERE lname LIKE ? ESCAPE \'\\\' AND kind NOT IN (\'heading\', \'test\')', `%${escapeLike(t)}%`)
+      idf.set(t, 1 / Math.log(1 + Math.max(row?.n ?? 0, 1)))
+    }
+    const best = new Map() // path|name|line -> row with summed per-term bonus
+    for (const t of terms) {
+      const rows = this.all(
+        `SELECT name, kind, path, line, signature,
+                CASE WHEN lname = ? THEN 0 WHEN lname LIKE ? ESCAPE '\\' THEN 1 ELSE 2 END AS rank
+         FROM symbols WHERE lname = ? OR lname LIKE ? ESCAPE '\\' OR lname LIKE ? ESCAPE '\\'
+         ORDER BY rank, length(path), path, line LIMIT 200`,
+        t, `${escapeLike(t)}%`, t, `${escapeLike(t)}%`, `%${escapeLike(t)}%`
+      )
+      for (const r of rows) {
+        const key = `${r.path}|${r.name}|${r.line}`
+        // Headings are prose, not identifiers — demote them in identifier-first
+        // ranking (they stay reachable as page hits via FTS).
+        const factor = r.kind === 'heading' ? 0.4 : 1
+        const bonus = (r.rank === 0 ? 1.2 : r.rank === 1 ? 0.9 : 0.4) * idf.get(t) * factor
+        const cur = best.get(key)
+        if (cur) cur.score = Math.round((cur.score + bonus) * 1000) / 1000
+        else best.set(key, { ...r, score: Math.round((bonus + (/(^|\/)test|\.test\.|spec\./i.test(r.path) ? -0.5 : 0)) * 1000) / 1000 })
+      }
+    }
+    const scored = [...best.values()].sort((a, b) => b.score - a.score || a.path.length - b.path.length || a.path.localeCompare(b.path) || a.line - b.line)
     return scored.slice(0, limit)
   }
   symbolsForPage(pageId) { return this.all('SELECT * FROM symbols WHERE page_id = ? ORDER BY line', pageId) }

@@ -4,6 +4,56 @@ All notable changes to this project are documented here. The format is loosely
 based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the
 project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] — 2026-11-17
+
+The retrieval sprint: 50% → 100% recall@5 on the shipped fixtures — because
+the hybrid sweep was broken, and the index ranked by substring luck.
+
+### Added
+
+- **CI covers Windows and retrieval quality** — the existing CI matrix gains
+  `windows-latest` (the watcher/pidfile tests exercise `fs.watch` and rg
+  spawning, which behave differently across platforms) and an eval smoke:
+  `index` → shipped fixtures → recall floor 0.75 per PR. Runners don't ship
+  ripgrep (ubuntu images dropped it — the rg tests caught that on the first
+  CI run), so both OSes install it explicitly.
+
+### Fixed
+
+- **`query --rg` searched only the first term of every multi-word query.**
+  The ripgrep invocation spread the terms after a single `-e`
+  (`rg -e a b c root`), so terms 2+ became *path* arguments — rg exited 2
+  ("pidfile: The system cannot find the file specified", silenced by
+  `--no-messages`) having searched only the first term. This is why hybrid
+  never beat index in the 0.3.0 self-eval. One `-e` per term now, and partial
+  scans (exit ≥ 2) retry once before being reported via `rgNote`.
+
+### Changed
+
+- **Per-term symbol search** — a multi-word query unions each term's
+  exact/prefix/substring matches instead of requiring the whole query as one
+  identifier substring ("index corpus distil" used to match no symbol at
+  all). Match bonuses are idf-weighted with df taken over identifier-like
+  symbols only (md headings and test-name prose are English, not identifiers,
+  and no longer dilute every weight); headings are demoted ×0.4 in
+  identifier-first ranking but stay reachable as page hits.
+- **Rarity-first rg cap** — the hybrid sweep pools matches first, then lets
+  lines matching more distinct (and rarer) terms win the slots
+  (Σ 1/log(1+lineDf) per term), so a generic term like `index` cannot flood
+  the five slots before the rare term's file surfaces.
+- **Merged ranking pool** — symbols, FTS pages, and rg body lines now compete
+  in one score-sorted list with deterministic tie-breaks, and a query term
+  that names the file boosts it (exact basename token +3, prefix +2, e.g.
+  "watcher" surfaces watch.mjs). Page hits and rg lines can no longer be
+  crowded out of rank k by insertion order.
+
+### Eval
+
+- recall@5 **50% → 100%** (12/12, both modes), MRR 0.32 → 0.68/0.69 on the
+  shipped `bench/eval-fixtures.json`. Re-run against the pre-change corpus
+  the new code still scores 100% — the move is the code, not corpus drift.
+- Test suite 86 (was 81), including regression tests for each fix.
+
 ## [0.3.0] — 2026-11-17
 
 Navigation, evaluation, handoffs — and the index stops being the only map.

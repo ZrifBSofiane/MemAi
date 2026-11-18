@@ -141,3 +141,172 @@ test('MCP surface: mem op=miss records, op=query passes rg, op=fault passes deep
     assert.equal(JSON.parse(m.stdout.trim()).ok, true)
   } finally { /* cleanup via test.after */ }
 })
+
+/** Corpus for ranking tests: generic-term floods + filename-discriminated files. */
+function makeFloodCorpus(root) {
+  fs.mkdirSync(path.join(root, 'src'), { recursive: true })
+  fs.writeFileSync(path.join(root, 'package.json'), JSON.stringify({ name: 'flood-corpus', version: '1.0.0', type: 'module' }, null, 2) + '\n')
+  for (const name of ['a.js', 'b.js', 'c.js', 'd.js']) {
+    fs.writeFileSync(path.join(root, 'src', name), [
+      'export const x = 1',
+      'export function indexBuilder() { return x }',
+      '',
+    ].join('\n'))
+  }
+  fs.writeFileSync(path.join(root, 'src', 'watch.js'), [
+    'export function startWatcher() {',
+    '  // liveness index: reads the pidfile left by the previous run',
+    '  const pidfile = ".memai/watch.pid"',
+    '  return pidfile',
+    '}',
+    '',
+  ].join('\n'))
+  fs.writeFileSync(path.join(root, 'src', 'cache.js'), [
+    'export function cacheGet(key) { return null }',
+    'export function cacheStore(key, v) { return v }',
+    '',
+  ].join('\n'))
+  // Shorter path than cache.js: without a file-name boost, plain score ties
+  // resolve to this file first, so only a real boost can put cache.js on top.
+  fs.writeFileSync(path.join(root, 'src', 's.js'), [
+    '// cache cache cache — generic mentions of cache and store in body text',
+    'export const cache_store = { get: () => null }',
+    '',
+  ].join('\n'))
+}
+
+/** Fresh indexed flood corpus; returns { root, store, pages }. */
+async function floodProject() {
+  const dir = tempDir()
+  cleanup.push(dir)
+  const root = path.join(dir, 'project')
+  fs.mkdirSync(root, { recursive: true })
+  makeFloodCorpus(root)
+  const store = new MemoryStore({ dbPath: path.join(root, '.memai', 'mem.db'), root })
+  store.setMeta('root', root)
+  const pages = new MemoryPages({ store, root })
+  await pages.index({ maxFiles: 500 })
+  return { root, store, pages }
+}
+
+test('symbol search splits multi-word queries and ranks by specificity', async () => {
+  const { store, pages } = await project()
+  try {
+    // "verify token" as one substring matches no symbol name; per-term it must
+    // surface verifyToken (matches BOTH terms: prefix + substring) above
+    // single-term substring matches like issueToken.
+    const r = pages.query('verify token', { k: 5 })
+    assert.ok(r.hits.length >= 1)
+    assert.equal(r.hits[0].kind, 'symbol')
+    assert.equal(r.hits[0].symbol, 'verifyToken')
+    assert.equal(r.hits[0].path, 'src/auth.js')
+
+    // Single-word contract preserved (fault resolution depends on it):
+    // exact > prefix > substring.
+    const single = store.symbolSearch('verifyToken', { limit: 1 })
+    assert.equal(single[0].name, 'verifyToken')
+    assert.equal(single[0].path, 'src/auth.js')
+    const sub = store.symbolSearch('issueToken', { limit: 1 })
+    assert.equal(sub[0].name, 'issueToken')
+  } finally { store.close() }
+})
+
+test('rg cap is rarity-first: rare and multi-term lines beat generic floods', async () => {
+  const { store, pages } = await floodProject()
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
+  try {
+    // "index" appears in every filler file; "pidfile" only in watch.js.
+    // The two-term line (liveness index + pidfile) must rank first and the
+    // rare pidfile-only line must surface — generic floods may not take all
+    // slots. Fresh files can be briefly unreadable to rg (AV scans), so wait
+    // for the full pool before asserting, like the body-text test above.
+    let r = null
+    let twoTerm = null
+    let pidfileOnly = null
+    for (let i = 0; i < 10 && !(twoTerm && pidfileOnly); i++) {
+      r = pages.query('index pidfile', { k: 5, rg: true })
+      twoTerm = r.hits.find((h) => h.path === 'src/watch.js' && h.snippet.includes('pidfile') && h.snippet.includes('index'))
+      pidfileOnly = r.hits.find((h) => h.path === 'src/watch.js' && h.snippet.includes('const pidfile'))
+      if (!(twoTerm && pidfileOnly)) await sleep(300)
+    }
+    assert.ok(r && r.hits.length >= 3, `expected rg hits: ${JSON.stringify(r?.hits)}`)
+    assert.ok(twoTerm, `two-term watch.js line must surface: ${JSON.stringify(r.hits)}`)
+    assert.ok(pidfileOnly, `rare pidfile-only line must surface: ${JSON.stringify(r.hits)}`)
+    assert.equal(r.hits[0].path, 'src/watch.js', `top hit should be the two-term line: ${JSON.stringify(r.hits.slice(0, 3))}`)
+    assert.equal(r.hits[0].kind, 'text')
+    assert.equal(r.hits[0].line, twoTerm.line)
+    assert.ok(r.hits.findIndex((h) => h.path === 'src/watch.js' && h.snippet.includes('const pidfile')) < r.hits.findIndex((h) => h.path !== 'src/watch.js' || h.kind !== 'text'), `rare line beats the generic flood: ${JSON.stringify(r.hits.slice(0, 5))}`)
+  } finally { store.close() }
+})
+
+test('file-name matches boost a page above body-only mentions', async () => {
+  const { store, pages } = await floodProject()
+  try {
+    // cache.js and s.js both contain "cache" and "store" in their paged text,
+    // and s.js even has the shorter path — but only cache.js has a query term
+    // as its file name, so the file-name boost must put it first.
+    const r = pages.query('cache store', { k: 5 })
+    assert.ok(r.hits.length >= 2, `expected page hits: ${JSON.stringify(r.hits)}`)
+    assert.equal(r.hits[0].path, 'src/cache.js', `file-name hit should rank first: ${JSON.stringify(r.hits.slice(0, 3))}`)
+  } finally { store.close() }
+})
+
+test('exact symbol match survives prose-diluted idf', async () => {
+  const dir = tempDir()
+  cleanup.push(dir)
+  const root = path.join(dir, 'project')
+  fs.mkdirSync(path.join(root, 'src'), { recursive: true })
+  fs.mkdirSync(path.join(root, 'docs'), { recursive: true })
+  fs.writeFileSync(path.join(root, 'package.json'), '{"name":"docs-polluted","version":"1.0.0","type":"module"}')
+  fs.writeFileSync(path.join(root, 'src', 'pager.js'), 'export function fault(sym) { return sym }\nexport function pageFor(id) { return id }\n')
+  // Markdown headings become pseudo-symbols; several headings mention `fault`,
+  // which dilutes its idf across the symbols table.
+  for (const n of [1, 2, 3, 4, 5]) {
+    fs.writeFileSync(path.join(root, 'docs', `guide${n}.md`), `# Guide ${n}\n\n## Using fault <symbol> to slice a body\n\nThen \`query\` to locate it.\n`)
+  }
+  const store = new MemoryStore({ dbPath: path.join(root, '.memai', 'mem.db'), root })
+  store.setMeta('root', root)
+  const pages = new MemoryPages({ store, root })
+  await pages.index({ maxFiles: 500 })
+  try {
+    // `fault` is an exact identifier match in src/pager.js — it must outrank
+    // flat page hits that merely mention the words in prose.
+    const r = pages.query('fault symbol slice', { k: 5 })
+    assert.ok(r.hits.length >= 1)
+    assert.equal(r.hits[0].path, 'src/pager.js', `exact symbol should rank first: ${JSON.stringify(r.hits.slice(0, 3))}`)
+    assert.equal(r.hits[0].symbol, 'fault')
+  } finally { store.close() }
+})
+
+test('multi-term code symbol beats generic single-term exact matches', async () => {
+  const dir = tempDir()
+  cleanup.push(dir)
+  const root = path.join(dir, 'project')
+  fs.mkdirSync(path.join(root, 'src'), { recursive: true })
+  fs.mkdirSync(path.join(root, 'docs'), { recursive: true })
+  fs.writeFileSync(path.join(root, 'package.json'), '{"name":"multi-term","version":"1.0.0","type":"module"}')
+  fs.writeFileSync(path.join(root, 'src', 'store.js'), [
+    'export function merkleVersion(tree) { return tree }',
+    'export function merkleroot(tree) { return tree }',
+    '',
+  ].join('\n'))
+  // Generic single-term identifiers exist across many files, and prose-heavy
+  // md headings mention all the query words.
+  for (const n of [1, 2, 3]) {
+    fs.writeFileSync(path.join(root, 'src', `mod${n}.js`), `export const version = ${n}\n`)
+  }
+  for (const n of [1, 2, 3, 4, 5]) {
+    fs.writeFileSync(path.join(root, 'docs', `guide${n}.md`), `# Guide ${n}\n\n## The merkle version manifest layout\n\nKeep it fresh.\n`)
+  }
+  const store = new MemoryStore({ dbPath: path.join(root, '.memai', 'mem.db'), root })
+  store.setMeta('root', root)
+  const pages = new MemoryPages({ store, root })
+  await pages.index({ maxFiles: 500 })
+  try {
+    // merkleVersion matches TWO terms; bare `version` matches one generic term.
+    // Heading pseudo-symbols must not dilute the weights that decide this.
+    const r = pages.query('merkle version manifest', { k: 5 })
+    assert.ok(r.hits.length >= 1)
+    assert.equal(r.hits[0].path, 'src/store.js', `multi-term symbol should rank first: ${JSON.stringify(r.hits.slice(0, 3))}`)
+  } finally { store.close() }
+})

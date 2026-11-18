@@ -106,9 +106,11 @@ per-question numbers and honest losses in
 - graphify won one leg fairly: shortest-path between imports (`path`, 30 tok)
   — MemAi's `graph` returns all chains (256 tok). A `--shortest` mode is the
   noted follow-up.
-- Self-measured retrieval baseline (`memai eval`, shipped in 0.3.0): recall@5
-  **50%** / MRR 0.32 on 12 fixtures, both modes — published as the number
-  future retrieval work has to move.
+- Self-measured retrieval (`memai eval`): the shipped 0.3.0 baseline was
+  recall@5 **50%** / MRR 0.32 on 12 fixtures, both modes. The 0.4.0 retrieval
+  fixes moved it to **100%** / MRR 0.68 on the same fixtures — the hybrid
+  sweep had been searching only the first term of multi-word queries, and
+  symbol/page ranking is now per-term and idf-weighted.
 - Where graphify genuinely wins: architecture-wide discovery (community
   detection, god nodes), mixed corpora (papers, images, video), cross-repo
   merged graphs, and human-facing HTML/GraphRAG exports. MemAi does none of
