@@ -9,11 +9,8 @@ OpenCode, ZCode and DeepSeek Harness.
 
 [![CI](https://github.com/ZrifBSofiane/MemAi/actions/workflows/ci.yml/badge.svg)](https://github.com/ZrifBSofiane/MemAi/actions/workflows/ci.yml)
 
-> **v0.1.1 preview.** The measured numbers below are real runs on one machine
-> (Windows 11, Node 24.14); the compatibility matrix labels what was verified on
-> an installed agent versus documented from vendor docs. npm package:
-> `memai-cli` · CLI binary: `memai` · MCP binary: `memai-mcp` · store: `.memai/`
-> · root env: `MEMAI_ROOT`.
+npm package: `memai-cli` · CLI binary: `memai` · MCP binary: `memai-mcp` ·
+store: `.memai/` · root env: `MEMAI_ROOT`.
 
 ## The problem, in one measurement
 
@@ -86,32 +83,30 @@ reads are already cheap) to 5.50× (a locate task on the real 288-file corpus).
 graphify (v0.9.34) builds a knowledge graph over a corpus (AST for code, LLM
 extraction for docs) with community detection and budgeted graph queries. It is
 the closest tool in spirit, so we compared them on the **same copy of this
-repository** (75 files, 13.1K LOC), same machine, same day. Full method in
-[`bench/GRAPHIFY.md`](bench/GRAPHIFY.md).
-
-Re-run on 0.3.0 across **six questions** spanning task types (full method,
+repository** (81 files, 14.3K LOC), same machine, same day. Full method,
 per-question numbers and honest losses in
-[`bench/BENCHMARK-0.3.0.md`](bench/BENCHMARK-0.3.0.md); 0.2.1 record in
-[`bench/GRAPHIFY.md`](bench/GRAPHIFY.md)):
+[`bench/BENCHMARK-0.4.0.md`](bench/BENCHMARK-0.4.0.md) (earlier records:
+[`bench/BENCHMARK-0.3.0.md`](bench/BENCHMARK-0.3.0.md),
+[`bench/GRAPHIFY.md`](bench/GRAPHIFY.md)).
 
-| | MemAi 0.3+ | graphify 0.9.34 |
+Across **six questions** spanning task types:
+
+| | MemAi | graphify 0.9.34 |
 | --- | --- | --- |
-| Per-session instruction overhead | **891 tok** (one MCP tool schema) | ~14,100 tok (SKILL.md + query reference, loaded per invocation) |
-| Zero-token build coverage | **all 77 files** (code + docs + config) | 50 code files only — docs/papers/images need its LLM extraction (real tokens) |
-| Totals across 6 questions | **1,671 tok — every answer complete** | 3,739 tok — 2 outright misses, 1 truncated, bodies still need file reads |
+| Per-session instruction overhead | **986 tok** (one MCP tool schema) | 10,351 tok (`skill.md`, loaded per invocation) |
+| Zero-token build coverage | **all 81 files** (code + docs + config) | code files only — docs/papers/images need its LLM extraction (real tokens) |
+| Totals across 6 questions | **1,461 tok — every answer complete** | 4,173 tok — 3 outright misses, 2 truncated, bodies still need file reads |
 
-- **~2.2× fewer tokens across the six questions** (~11× less per-session
+- **~2.9× fewer tokens across the six questions** (~10.5× less per-session
   instruction overhead), with the answer being the code itself rather than an
   address that still needs a read.
-- graphify won the shortest-path leg in 0.3.0 (`path`, 30 tok vs our
-  all-chains 256 tok) — 0.4.0 closes it: `graph --shortest a b` answers the
-  B4 scenario ("trace bin/memai.mjs → src/store.mjs") in **39 tok** (2 hops,
-  edge specs included), and `affected <target>` adds transitive blast radius.
-- Self-measured retrieval (`memai eval`): the shipped 0.3.0 baseline was
-  recall@5 **50%** / MRR 0.32 on 12 fixtures, both modes. The 0.4.0 retrieval
-  fixes moved it to **100%** / MRR 0.68 on the same fixtures — the hybrid
-  sweep had been searching only the first term of multi-word queries, and
-  symbol/page ranking is now per-term and idf-weighted.
+- Shortest path: `graph --shortest a b` answers the trace question
+  ("bin/memai.mjs → src/store.mjs") in **39 tok** (2 hops, edge specs
+  included); graphify's rebuild no longer connects that pair even in
+  undirected mode. `affected <target>` adds transitive blast radius in one
+  page.
+- Self-measured retrieval (`memai eval`, 12 shipped fixtures): recall@5
+  **100%**, MRR 0.68 (index) / 0.69 (hybrid).
 - Where graphify genuinely wins: architecture-wide discovery (community
   detection, god nodes), mixed corpora (papers, images, video), cross-repo
   merged graphs, and human-facing HTML/GraphRAG exports. MemAi does none of
@@ -119,12 +114,12 @@ per-question numbers and honest losses in
 
 > **Method note.** Token counts measured with the same `chars / 3.966`
 > estimator on both sides; graphify queried through its CLI at its default
-> 2,000-token budget. Two questions, one repo, one machine — a navigation
+> 2,000-token budget. Six questions, one repo, one machine — a navigation
 > benchmark, **not** a feature-parity claim.
 
-## Freshness automation (0.2+)
+## Freshness automation
 
-An index is only useful while it is fresh, and 0.2 made freshness mechanical
+An index is only useful while it is fresh, so freshness is mechanical
 instead of memorized:
 
 ```bash
@@ -141,11 +136,13 @@ npx -y memai-cli status           # now reports "freshness: fresh (75 files)"
   falls back to one full pass on >50-path bursts, holds a circuit breaker
   against pathological writers, and never watches `.memai/` itself.
 
-## Navigate, resume, evaluate (0.3+)
+## Navigate, resume, evaluate
 
 ```bash
 memai graph src/page.mjs --depth 2  # importers, imports, reverse chains, cycles
 memai graph resolveDb               # symbol targets resolve to their file
+memai graph --shortest a b          # BFS shortest import path between two files/symbols
+memai affected src/store.mjs        # blast radius: transitive importers with hop counts
 memai checkpoint                    # mark "I have read up to here"
 memai diff --last                   # resume delta without hunting for a hash
 memai pack handoff                  # budgeted bundle: card + notes + resume version
@@ -163,7 +160,7 @@ run it after index upgrades to see whether recall actually moved.
 ```
                     ┌──────────────────────────────────────────────┐
   Claude Code       │  MCP server (memai-mcp)   CLI (memai)         │
-  Codex             │  one `mem` tool, 11 ops    same surface       │
+  Codex             │  one `mem` tool, 15 ops    same surface       │
   OpenCode     ───► │  JSON-RPC over stdio       JSON on stdout     │
   ZCode             └──────────────────┬───────────────────────────┘
   DSH plugin                           │ page ids · symbol anchors · version hashes
@@ -294,7 +291,7 @@ directory without `--force`. Verify with `memai skill list` and the agent's own 
 - the store, extractor, pager, budget clamping, delta and board: **18/18**
   `node bench/selftest.mjs` checks pass;
 - the benchmark numbers above (`node bench/bench.mjs`, rerun);
-- the MCP stdio handshake, tool list (one `mem` tool by default, 11 granular
+- the MCP stdio handshake, tool list (one `mem` tool by default, 15 granular
   tools under `MEMAI_GRANULAR_TOOLS=1`), `tools/call`, resources and the
   clean-stdout invariant (`node --test "test/*.test.mjs"`,
   `node scripts/mcp-probe.mjs`);
@@ -344,7 +341,7 @@ MemAi is honest about where paging loses. All of these are measured, not guessed
   `fault <path>:<line>` and raw `read` are the fallbacks.
 - **Single store, single writer.** The board coordinates agents on one machine
   sharing one `.memai/mem.db`. Cross-machine sharing needs a shared path or a
-  sync layer (not in v1).
+  sync layer (not built).
 - **Out-of-process agents don't inherit host context.** A DSH in-process plugin
   can inject the card into every in-process child; Claude Code / Codex /
   OpenCode / ZCode reach MemAi through MCP or the CLI, and inject the card via
@@ -384,6 +381,9 @@ PROTOCOL.md   normative page/version/delta/tool contract for implementers
 - [Design & cost model](docs/design.md)
 - [Evidence: where the tokens go](docs/evidence.md)
 - [Benchmark results](bench/RESULTS.md)
+- [Head-to-head vs graphify](bench/BENCHMARK-0.4.0.md) ·
+  [archive: 0.3.0](bench/BENCHMARK-0.3.0.md) ·
+  [archive: 0.2.1](bench/GRAPHIFY.md)
 - [FAQ](docs/faq.md)
 
 ## Development

@@ -58,6 +58,13 @@ Examples:
   node src/cli.mjs diff --since 3d1a9f2c
 `
 
+// Flags that are pure switches: they never consume the next token as a value,
+// so `graph --shortest <a> <b>` and `query --rg <terms>` parse correctly.
+const BOOLEAN_FLAGS = new Set([
+  'json', 'text', 'force', 'no-stale', 'read-only', 'rg', 'deep', 'stats',
+  'last', 'checkpoint', 'shortest', 'no-card', 'global', 'link', 'md', 'purge', 'missing-only',
+])
+
 function parseArgv(argv) {
   const positional = []
   const flags = {}
@@ -68,7 +75,7 @@ function parseArgv(argv) {
       if (eq > 0) { flags[a.slice(2, eq)] = a.slice(eq + 1); continue }
       const key = a.slice(2)
       const next = argv[i + 1]
-      if (next !== undefined && !next.startsWith('--')) { flags[key] = next; i++ } else flags[key] = true
+      if (!BOOLEAN_FLAGS.has(key) && next !== undefined && !next.startsWith('--')) { flags[key] = next; i++ } else flags[key] = true
     } else positional.push(a)
   }
   return { positional, flags }

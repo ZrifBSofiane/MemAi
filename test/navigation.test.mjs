@@ -297,6 +297,14 @@ test('affected + graph --shortest CLI surface', async () => {
     assert.equal(parsed.hops, 2)
     assert.equal(parsed.direction, 'imports')
 
+    // Flag-first order must work identically: `--shortest` is boolean and
+    // must not swallow the next positional as its value.
+    const sf = await runNode([SELF.bin, 'graph', '--shortest', 'src/a.js', 'src/c.js', '--root', root], { cwd: root })
+    assert.equal(sf.code, 0, sf.stderr)
+    const pf = JSON.parse(sf.stdout.trim())
+    assert.equal(pf.ok, true, `flag-first shortest failed: ${pf.error}`)
+    assert.equal(pf.hops, 2)
+
     const af = await runNode([SELF.bin, 'affected', 'c', '--root', root], { cwd: root })
     assert.equal(af.code, 0, af.stderr)
     const pa = JSON.parse(af.stdout.trim())
