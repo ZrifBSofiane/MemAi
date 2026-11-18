@@ -19,13 +19,13 @@ import { defaultAgent, isGranularTools, openProject, closeProject } from './path
 export const TOOL_NAME = 'mem'
 export const SERVER_NAME = 'memai-mcp'
 
-export const OPS = ['card', 'map', 'query', 'fault', 'get', 'diff', 'status', 'index', 'note', 'post', 'inbox', 'miss', 'graph', 'pack']
+export const OPS = ['card', 'map', 'query', 'fault', 'get', 'diff', 'status', 'index', 'note', 'post', 'inbox', 'miss', 'graph', 'affected', 'pack']
 
 /** Ops that may create the store/db when it does not exist yet. */
 const WRITE_OPS = new Set(['index', 'note', 'post'])
 
 /** Per-op budget ceilings: one call must not be able to buy a huge context. */
-const MAX_BUDGET = { card: 1500, map: 3500, get: 4000, fault: 2500, query: 1200, diff: 1500, inbox: 2000, graph: 1200, pack: 2500 }
+const MAX_BUDGET = { card: 1500, map: 3500, get: 4000, fault: 2500, query: 1200, diff: 1500, inbox: 2000, graph: 1200, affected: 1200, pack: 2500 }
 const DEFAULT_BUDGET = {
   card: DEFAULTS.card, map: DEFAULTS.map, get: DEFAULTS.get, fault: DEFAULTS.fault,
   query: DEFAULTS.query, diff: DEFAULTS.diff, inbox: 900,
@@ -69,7 +69,7 @@ function memInputSchema() {
       op: {
         type: 'string',
         enum: OPS,
-        description: 'Operation. card|map|status read pages; query+fault locate and fetch code; graph navigates module dependencies; get reads one page; diff resumes since a version (checkpoint/last); index refreshes after edits; note/post/inbox share state with other agents; miss logs a retrieval failure; pack assembles a handoff bundle.',
+        description: 'Operation. card|map|status read pages; query+fault locate and fetch code; graph navigates module dependencies (target2: shortest path); affected: blast radius; get reads one page; diff resumes since a version (checkpoint/last); index refreshes after edits; note/post/inbox share state with other agents; miss logs a retrieval failure; pack assembles a handoff bundle.',
       },
       budget: { type: 'integer', minimum: 1, maximum: 4000, description: 'Token budget for this response; defaults are tuned, pass a smaller budget for a cheap peek.' },
       maxFiles: { type: 'integer', minimum: 1, maximum: 100000, description: 'index: cap on indexed files.' },
@@ -82,7 +82,8 @@ function memInputSchema() {
       hitPath: { type: 'string', description: 'miss: where it was found (path or page id).' },
       stats: { type: 'boolean', description: 'miss: return miss stats instead of recording one.' },
       depth: { type: 'integer', minimum: 1, maximum: 5, description: 'graph: transitive importer chain depth (default 1).' },
-      target: { type: 'string', description: 'fault: symbol, path#symbol, path:line, or path. graph: a path or symbol.' },
+      target: { type: 'string', description: 'fault: symbol, path#symbol, path:line, or path. graph/affected: a path or symbol.' },
+      target2: { type: 'string', description: 'graph: second endpoint; with target returns the shortest import path between them.' },
       card: { type: 'boolean', description: 'pack: include the project card (default true).' },
       faults: { type: 'string', description: 'pack: comma-separated symbols to include as short slices.' },
       last: { type: 'boolean', description: 'diff: diff since the last checkpoint for your agent (use diff checkpoint:true first).' },
@@ -173,8 +174,13 @@ const granularSpec = [
   },
   {
     name: 'mem_graph', op: 'graph', title: 'MemAi: module dependency graph',
-    description: 'Import navigation from the stored imports table (~100 tokens): what a path/symbol imports, what imports it, transitive importer chains and cycles. Use for "what breaks if this changes" and dependency questions; depth > 1 for chains.',
-    inputSchema: { type: 'object', properties: { target: { type: 'string' }, depth: { type: 'integer', minimum: 1, maximum: 5 }, budget: { type: 'integer', minimum: 1, maximum: 1200 } }, required: ['target'], additionalProperties: false },
+    description: 'Import navigation from the stored imports table (~100 tokens): what a path/symbol imports, what imports it, transitive importer chains and cycles. Use for "what breaks if this changes" and dependency questions; depth > 1 for chains. With target2 set, returns the BFS shortest import path between the two endpoints instead.',
+    inputSchema: { type: 'object', properties: { target: { type: 'string' }, target2: { type: 'string', description: 'second endpoint: shortest import path target <-> target2' }, depth: { type: 'integer', minimum: 1, maximum: 5 }, budget: { type: 'integer', minimum: 1, maximum: 1200 } }, required: ['target'], additionalProperties: false },
+  },
+  {
+    name: 'mem_affected', op: 'affected', title: 'MemAi: blast radius',
+    description: 'Files that transitively import the target, with hop counts (~100 tokens, cycle-safe). Use before renaming or changing a module to see what else is touched; per-symbol callers are mem_fault --deep.',
+    inputSchema: { type: 'object', properties: { target: { type: 'string', description: 'a path or symbol' }, budget: { type: 'integer', minimum: 1, maximum: 1200 } }, required: ['target'], additionalProperties: false },
   },
   {
     name: 'mem_pack', op: 'pack', title: 'MemAi: handoff bundle',
@@ -277,7 +283,14 @@ export async function dispatch({ root = null, db = null, env = process.env, cwd 
       case 'graph': {
         const target = str(args.target)
         if (!target) return errorResult(op, 'graph requires target (a path or symbol)')
+        const target2 = str(args.target2)
+        if (target2) return toToolResult(op, pages.graphShortest(target, target2, { budget: budgetFor('graph', args) }))
         return toToolResult(op, pages.graph(target, { depth: clampInt(args.depth, 1, 1, 5), budget: budgetFor('graph', args) }))
+      }
+      case 'affected': {
+        const target = str(args.target)
+        if (!target) return errorResult(op, 'affected requires target (a path or symbol)')
+        return toToolResult(op, pages.affected(target, { budget: budgetFor('affected', args) }))
       }
       case 'pack':
         return toToolResult(op, pages.pack(str(args.topic) || 'handoff', { budget: budgetFor('pack', args), faults: args.faults ? [str(args.faults)] : [], card: args.card !== false, agent: str(args.agent) || defaultAgent(env) }))

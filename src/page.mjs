@@ -546,21 +546,66 @@ export class MemoryPages {
    * `graph <path|symbol>` reports what a file imports, what imports it
    * (reverse edges), transitive importer chains to `--depth`, and cycles.
    */
-  graph(target, { depth = 1, budget = DEFAULTS.graph } = {}) {
+  /** Resolve a graph endpoint (path or symbol) to its file. Shared by
+   *  graph(), graphShortest() and affected(). */
+  _resolveGraphNode(target) {
     target = normPath(target)
-    if (!target) return { ok: false, error: 'empty graph target', tokens: 0 }
+    if (!target) return { error: 'empty graph target' }
     if (target.startsWith('file:')) target = target.slice(5)
     let sym = null
     let file = this._findFile(target)
     if (!file) {
       const cands = this.store.symbolSearch(target, { limit: 1 })
-      if (!cands.length) return { ok: false, error: `no file or symbol: ${target}`, tokens: 0 }
+      if (!cands.length) return { error: `no file or symbol: ${target}` }
       const best = cands[0]
       file = this.store.getFile(best.path)
       sym = { name: best.name, line: best.line }
     }
-    if (!file) return { ok: false, error: `no file: ${target}`, tokens: 0 }
-    const rel = file.path
+    if (!file) return { error: `no file: ${target}` }
+    return { rel: file.path, sym, target }
+  }
+
+  /** Resolved internal import edges: fwd[from] = {to: spec}, rev[to] = {from: spec}. */
+  _importEdges() {
+    const fileSet = new Set(this.store.allFiles().map((r) => r.path))
+    const fwd = new Map()
+    const rev = new Map()
+    for (const r of this.store.all('SELECT path, module FROM imports')) {
+      const to = this._resolveSpec(r.path, r.module, fileSet)
+      if (!to) continue
+      if (!fwd.has(r.path)) fwd.set(r.path, new Map())
+      fwd.get(r.path).set(to, r.module)
+      if (!rev.has(to)) rev.set(to, new Map())
+      rev.get(to).set(r.path, r.module)
+    }
+    return { fwd, rev }
+  }
+
+  /** BFS shortest path over an edge map; null when unreachable. */
+  _bfsPath(edges, from, to) {
+    if (from === to) return [from]
+    const prev = new Map([[from, null]])
+    const queue = [from]
+    for (let qi = 0; qi < queue.length; qi++) {
+      const node = queue[qi]
+      for (const next of edges.get(node)?.keys() ?? []) {
+        if (prev.has(next)) continue
+        prev.set(next, node)
+        if (next === to) {
+          const p = []
+          for (let n = to; n !== null; n = prev.get(n)) p.unshift(n)
+          return p
+        }
+        queue.push(next)
+      }
+    }
+    return null
+  }
+
+  graph(target, { depth = 1, budget = DEFAULTS.graph } = {}) {
+    const g = this._resolveGraphNode(target)
+    if (g.error) return { ok: false, error: g.error, tokens: 0 }
+    const { rel, sym, target: t } = g
 
     const fileSet = new Set(this.store.allFiles().map((r) => r.path))
     const rows = this.store.all('SELECT path, module FROM imports')
@@ -607,8 +652,79 @@ export class MemoryPages {
     if (!reverse.length && !internal.length && !external.length) lines.push('(no import edges recorded — file has no imports and no importers)')
     const r = clampText(lines.join('\n'), budget)
     return {
-      ok: true, target, resolved: rel, symbol: sym?.name ?? null,
+      ok: true, target: t, resolved: rel, symbol: sym?.name ?? null,
       importers: reverse, imported: forward, chain, cycles, tokens: r.tokens, budget, truncated: r.truncated, text: r.text,
+    }
+  }
+
+  /**
+   * BFS shortest import path between two files/symbols (0.4.0 — closes the
+   * graphify B4 loss, 30 vs 256 tokens). Tries the imports direction first,
+   * then imported-by; cycles are visited-set safe.
+   */
+  graphShortest(a, b, { budget = DEFAULTS.graph } = {}) {
+    const ra = this._resolveGraphNode(a)
+    const rb = this._resolveGraphNode(b)
+    if (ra.error) return { ok: false, error: ra.error, tokens: 0 }
+    if (rb.error) return { ok: false, error: rb.error, tokens: 0 }
+    const { fwd, rev } = this._importEdges()
+    let path = this._bfsPath(fwd, ra.rel, rb.rel)
+    let direction = 'imports'
+    if (!path) {
+      path = this._bfsPath(rev, ra.rel, rb.rel)
+      direction = 'imported-by'
+    }
+    if (!path) return { ok: false, a: ra.rel, b: rb.rel, error: `no import path between ${ra.rel} and ${rb.rel} (either direction)`, tokens: 0 }
+    const edges = direction === 'imports' ? fwd : rev
+    const hops = path.length - 1
+    const lines = [`# shortest ${ra.rel} -> ${rb.rel}  (${hops} hop${hops === 1 ? '' : 's'}, ${direction})`]
+    lines.push(path[0])
+    for (let i = 1; i < path.length; i++) lines.push(`  -> ${path[i]}  [${edges.get(path[i - 1])?.get(path[i]) ?? ''}]`)
+    const r = clampText(lines.join('\n'), budget)
+    return {
+      ok: true, a, b, resolvedA: ra.rel, resolvedB: rb.rel,
+      symbolA: ra.sym?.name ?? null, symbolB: rb.sym?.name ?? null,
+      direction, hops, path, tokens: r.tokens, budget, truncated: r.truncated, text: r.text,
+    }
+  }
+
+  /**
+   * Blast radius (0.4.0): files that transitively import the target, BFS
+   * levels outward, cycle-safe. File-level — per-symbol callers are
+   * `fault <sym> --deep`'s job.
+   */
+  affected(target, { budget = DEFAULTS.graph, limit = 64 } = {}) {
+    const g = this._resolveGraphNode(target)
+    if (g.error) return { ok: false, error: g.error, tokens: 0 }
+    const { rev } = this._importEdges()
+    const files = []
+    const seen = new Set([g.rel])
+    let level = [g.rel]
+    let hops = 0
+    while (level.length) {
+      hops++
+      const next = []
+      for (const node of level) {
+        for (const [importer, spec] of rev.get(node) ?? []) {
+          if (seen.has(importer)) continue
+          seen.add(importer)
+          files.push({ path: importer, hops, spec })
+          next.push(importer)
+        }
+      }
+      level = next
+    }
+    files.sort((x, y) => x.hops - y.hops || x.path.length - y.path.length || x.path.localeCompare(y.path))
+    const capped = files.slice(0, limit)
+    const lines = [`# affected ${g.rel}${g.sym ? ` (${g.sym.name} @${g.sym.line})` : ''} — ${files.length} file${files.length === 1 ? '' : 's'} transitively import it`]
+    for (const f of capped) lines.push(`${f.hops}  ${f.path}  [${f.spec}]`)
+    if (!files.length) lines.push('(no importers — nothing in the index imports it)')
+    const r = clampText(lines.join('\n'), budget)
+    return {
+      ok: true, resolved: g.rel, symbol: g.sym?.name ?? null, count: files.length,
+      files: capped.map(({ path: p, hops: h }) => ({ path: p, hops: h })),
+      filesTruncated: files.length > capped.length,
+      tokens: r.tokens, budget, truncated: r.truncated, text: r.text,
     }
   }
 

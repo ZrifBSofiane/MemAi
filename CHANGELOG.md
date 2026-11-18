@@ -11,6 +11,19 @@ the hybrid sweep was broken, and the index ranked by substring luck.
 
 ### Added
 
+- **`memai graph --shortest <a> <b>`** — BFS shortest import path between two
+  files or symbols (~40 tokens). Tries the imports direction first, then
+  imported-by (flagged `direction: "imported-by"`); cycle-safe; endpoints
+  resolve as paths or symbols. Closes the one benchmark leg graphify won:
+  the B4 scenario ("trace bin/memai.mjs → src/store.mjs") now costs 39
+  tokens instead of 256, on par with graphify's 30 — with edge specs
+  included. MCP: `mem` op `graph` with `target2` set.
+- **`memai affected <path|symbol>`** — blast radius: every file that
+  transitively imports the target, BFS levels outward with hop counts,
+  cycle-safe, output clamped (files list capped at 64 + `filesTruncated`).
+  Per-symbol callers remain `fault <sym> --deep`'s job. MCP: new `affected`
+  op + `mem_affected` granular tool. Schema cost of both: the always-on
+  `mem` tool grows ~49 tokens (891 → ~940).
 - **CI covers Windows and retrieval quality** — the existing CI matrix gains
   `windows-latest` (the watcher/pidfile tests exercise `fs.watch` and rg
   spawning, which behave differently across platforms) and an eval smoke:

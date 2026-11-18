@@ -4,7 +4,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
-import { tempDir, makeCorpus } from '../scripts/test-helpers.mjs'
+import { tempDir, makeCorpus, SELF, runNode } from '../scripts/test-helpers.mjs'
 import { MemoryStore } from '../src/store.mjs'
 import { MemoryPages } from '../src/page.mjs'
 import { flushDelayMs, watcherAlive, DEBOUNCE_MS } from '../src/watch.mjs'
@@ -204,4 +204,105 @@ test('circuit breaker: normal debounce until flush budget, then hold past the wi
   // Old flushes age out and the breaker releases.
   const aging = Array.from({ length: 30 }, (_, i) => now - 59_000 + i)
   assert.equal(flushDelayMs(now + 1500, aging, {}), DEBOUNCE_MS, 'once the window clears, back to debounce')
+})
+
+// ------------------------------------------------------- 0.4.0: shortest/affected ---
+
+const chainCorpus = {
+  'src/a.js': 'import { b } from "./b"\nexport function a() { return b() }\n',
+  'src/b.js': 'import { c } from "./c.js"\nexport const b = () => c()\n',
+  'src/c.js': 'export function c() { return 1 }\n',
+  'src/d.js': 'export const d = 1\n',
+}
+
+test('graph --shortest: import chain between two files, BFS over imports', async () => {
+  const { store, pages } = await project(chainCorpus)
+  try {
+    const r = pages.graphShortest('src/a.js', 'src/c.js')
+    assert.ok(r.ok, r.error)
+    assert.equal(r.direction, 'imports')
+    assert.equal(r.hops, 2)
+    assert.deepEqual(r.path, ['src/a.js', 'src/b.js', 'src/c.js'])
+    assert.match(r.text, /2 hops/)
+    assert.match(r.text, /-> src\/b\.js/)
+    assert.ok(r.tokens <= 500 + 60, 'budget discipline')
+  } finally { store.close() }
+})
+
+test('graph --shortest: symbol endpoints and imported-by fallback', async () => {
+  const { store, pages } = await project(chainCorpus)
+  try {
+    // Querying leaf -> root: nothing imports FROM c, so the path runs the
+    // other direction (c is imported by b, which is imported by a).
+    const r = pages.graphShortest('c', 'a')
+    assert.ok(r.ok, r.error)
+    assert.equal(r.resolvedA, 'src/c.js')
+    assert.equal(r.resolvedB, 'src/a.js')
+    assert.equal(r.direction, 'imported-by')
+    assert.equal(r.hops, 2)
+    assert.deepEqual(r.path, ['src/c.js', 'src/b.js', 'src/a.js'])
+
+    // Same file: zero hops, no BFS needed.
+    const same = pages.graphShortest('src/b.js', 'b')
+    assert.ok(same.ok)
+    assert.equal(same.hops, 0)
+    assert.deepEqual(same.path, ['src/b.js'])
+
+    // d is an island: reachable from neither direction.
+    const none = pages.graphShortest('src/a.js', 'src/d.js')
+    assert.equal(none.ok, false)
+    assert.match(none.error, /no import path/)
+  } finally { store.close() }
+})
+
+test('affected: transitive importers with hop counts, cycle-safe', async () => {
+  const { store, pages } = await project(chainCorpus)
+  try {
+    const r = pages.affected('c')
+    assert.ok(r.ok, r.error)
+    assert.equal(r.resolved, 'src/c.js')
+    assert.equal(r.symbol, 'c')
+    assert.equal(r.count, 2)
+    assert.deepEqual(r.files, [
+      { path: 'src/b.js', hops: 1 },
+      { path: 'src/a.js', hops: 2 },
+    ])
+    assert.match(r.text, /src\/b\.js/)
+    assert.ok(r.tokens <= 500 + 60)
+  } finally { store.close() }
+})
+
+test('affected: cycles terminate without duplicates', async () => {
+  const { store, pages } = await project({
+    'src/a.js': 'import { b } from "./b.js"\nexport function a() { return b() }\n',
+    'src/b.js': 'import { c } from "./c.js"\nexport const b = () => c()\n',
+    'src/c.js': 'import { a } from "./a.js"\nexport function c() { return a() }\n',
+  })
+  try {
+    const r = pages.affected('src/c.js')
+    assert.ok(r.ok, r.error)
+    assert.equal(r.count, 2, 'a imports b imports c; the c->a edge must not duplicate')
+    assert.deepEqual(r.files.map((f) => f.path), ['src/b.js', 'src/a.js'])
+    assert.deepEqual(r.files.map((f) => f.hops), [1, 2])
+  } finally { store.close() }
+})
+
+test('affected + graph --shortest CLI surface', async () => {
+  const { root, store } = await project(chainCorpus)
+  try {
+    const s = await runNode([SELF.bin, 'graph', 'src/a.js', 'src/c.js', '--shortest', '--root', root], { cwd: root })
+    assert.equal(s.code, 0, s.stderr)
+    const parsed = JSON.parse(s.stdout.trim())
+    assert.equal(parsed.ok, true)
+    assert.equal(parsed.hops, 2)
+    assert.equal(parsed.direction, 'imports')
+
+    const af = await runNode([SELF.bin, 'affected', 'c', '--root', root], { cwd: root })
+    assert.equal(af.code, 0, af.stderr)
+    const pa = JSON.parse(af.stdout.trim())
+    assert.equal(pa.ok, true)
+    assert.equal(pa.resolved, 'src/c.js')
+    assert.equal(pa.count, 2, 'b imports c, a imports b — both transitively')
+    assert.deepEqual(pa.files.map((f) => f.path), ['src/b.js', 'src/a.js'])
+  } finally { store.close() }
 })
