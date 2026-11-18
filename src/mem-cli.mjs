@@ -26,6 +26,9 @@ const HELP = `MemAi CLI  (tokens are the currency; every response has a token co
   checkpoint [--agent A]     record the current version for a later diff --last
   graph <path|sym> [--depth N]   module dependency navigation: importers,
                              imports, reverse chains, cycles (from the imports table)
+  graph --shortest <a> <b>   BFS shortest import path between two files/symbols
+  affected <path|sym> [--budget 500]   blast radius: files that transitively
+                             import it, with hop counts (cycle-safe)
   pack [topic] [--fault "a,b"] [--no-card] [--budget 1500]  budgeted handoff
                              bundle: card + board notes + fault slices + resume version
   eval [--fixtures FILE] [--k 5] [--modes index,hybrid]  retrieval quality harness;
@@ -124,9 +127,19 @@ export async function run(argv, { env = null } = {}) {
         return { ok: true, cmd, ...pages.checkpoint(agent) }
       }
       case 'graph': {
-        const target = positional.slice(1).join(' ')
-        if (!target) return { ok: false, cmd, error: 'usage: graph <path|symbol> [--depth N]', tokens: 0 }
+        const targets = positional.slice(1)
+        if (flags.shortest) {
+          if (targets.length < 2) return { ok: false, cmd, error: 'usage: graph --shortest <a> <b>  (paths or symbols)', tokens: 0 }
+          return { ok: true, cmd, ...pages.graphShortest(targets[0], targets[1], { budget: num(flags.budget, DEFAULTS.graph) }) }
+        }
+        const target = targets.join(' ')
+        if (!target) return { ok: false, cmd, error: 'usage: graph <path|symbol> [--depth N] | graph --shortest <a> <b>', tokens: 0 }
         return { ok: true, cmd, ...pages.graph(target, { depth: num(flags.depth, 1), budget: num(flags.budget, DEFAULTS.graph) }) }
+      }
+      case 'affected': {
+        const target = positional.slice(1).join(' ')
+        if (!target) return { ok: false, cmd, error: 'usage: affected <path|symbol>', tokens: 0 }
+        return { ok: true, cmd, ...pages.affected(target, { budget: num(flags.budget, DEFAULTS.graph) }) }
       }
       case 'pack': {
         const topic = positional[1] ?? 'handoff'

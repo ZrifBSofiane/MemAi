@@ -103,9 +103,10 @@ per-question numbers and honest losses in
 - **~2.2× fewer tokens across the six questions** (~11× less per-session
   instruction overhead), with the answer being the code itself rather than an
   address that still needs a read.
-- graphify won one leg fairly: shortest-path between imports (`path`, 30 tok)
-  — MemAi's `graph` returns all chains (256 tok). A `--shortest` mode is the
-  noted follow-up.
+- graphify won the shortest-path leg in 0.3.0 (`path`, 30 tok vs our
+  all-chains 256 tok) — 0.4.0 closes it: `graph --shortest a b` answers the
+  B4 scenario ("trace bin/memai.mjs → src/store.mjs") in **39 tok** (2 hops,
+  edge specs included), and `affected <target>` adds transitive blast radius.
 - Self-measured retrieval (`memai eval`): the shipped 0.3.0 baseline was
   recall@5 **50%** / MRR 0.32 on 12 fixtures, both modes. The 0.4.0 retrieval
   fixes moved it to **100%** / MRR 0.68 on the same fixtures — the hybrid
