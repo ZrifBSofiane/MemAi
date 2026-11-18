@@ -28,7 +28,7 @@ const WRITE_OPS = new Set(['index', 'note', 'post'])
 const MAX_BUDGET = { card: 1500, map: 3500, get: 4000, fault: 2500, query: 1200, diff: 1500, inbox: 2000, graph: 1200, affected: 1200, pack: 2500 }
 const DEFAULT_BUDGET = {
   card: DEFAULTS.card, map: DEFAULTS.map, get: DEFAULTS.get, fault: DEFAULTS.fault,
-  query: DEFAULTS.query, diff: DEFAULTS.diff, inbox: 900,
+  query: DEFAULTS.query, diff: DEFAULTS.diff, inbox: 900, affected: DEFAULTS.graph,
 }
 
 // The stated break-even from the measured benchmark (bench/RESULTS.md): below
