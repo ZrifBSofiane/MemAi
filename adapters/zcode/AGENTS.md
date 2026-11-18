@@ -15,6 +15,11 @@ per-file signature pages, and a shared multi-agent board.
   after edits with `{"op":"index"}` (local, 0 model tokens).
 - share state with other agents: `{"op":"note","topic":"<topic>","body":"..."}` and
   `{"op":"inbox","agent":"<id>"}`. Send page ids and symbol names, never file bodies.
+- dependency or blast-radius questions: `{"op":"graph","target":"<path|symbol>"}` (importers, imports,
+  chains), `{"op":"affected","target":"<path|symbol>"}` (transitive importers with hop counts), and
+  `{"op":"graph","target":"<a>","target2":"<b>"}` — shortest import path (CLI `memai graph --shortest a b`).
+- session end: `memai checkpoint` records the resume version; `{"op":"pack","topic":"handoff"}` assembles
+  one budgeted page (card + notes + resume version) for the next agent.
 
 **Rules:** never inline content that can be referenced; prefer one `fault` over reading a whole
 file. Do NOT use MemAi for a single file under ~1.3 KB (~346 tokens) — a plain read is cheaper.
