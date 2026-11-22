@@ -557,9 +557,13 @@ export class MemoryPages {
       }
     }
     let rgNote = null
-    if (rg) {
+    // A body-only string (error text, literal) is invisible to the signature
+    // index. When the index finds nothing, run the existing ripgrep pass
+    // automatically instead of spending a second model call on `query --rg`.
+    const autoRg = !rg && hits.length === 0
+    if (rg || autoRg) {
       const extra = this._rgSearch(q, { cap: 5 })
-      rgNote = extra.note
+      rgNote = autoRg ? `auto-rg: ${extra.note ?? 'no index hits'}` : extra.note
       const seenLines = new Set(hits.filter((h) => h.line).map((h) => `${h.path}:${h.line}`))
       for (const h of extra.hits) {
         const key = `${h.path}:${h.line}`

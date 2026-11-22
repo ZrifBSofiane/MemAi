@@ -40,3 +40,12 @@ test('card carries the current project version for resume', async () => {
     assert.equal(d.ok, true, d.error)
   } finally { store.close() }
 })
+
+test('query auto-runs ripgrep when the index has no hits', async () => {
+  const { store, pages } = await fixture()
+  try {
+    const r = pages.query('pidfile', { k: 5 })
+    assert.ok(r.hits.some((h) => h.path === 'src/watch.js'), `expected a text hit:\n${r.text}`)
+    assert.match(r.rgNote ?? '', /auto-rg/)
+  } finally { store.close() }
+})
