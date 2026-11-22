@@ -36,13 +36,13 @@ export function sessionsSince({ dbPath = DEFAULT_DB, sinceMs = 0, cwd = null } =
   const db = open(dbPath)
   if (!db) return []
   try {
-    let rows = db.prepare('SELECT id, directory, title, time_created FROM session WHERE time_created >= ? ORDER BY time_created DESC').all(sinceMs)
+    let rows = db.prepare('SELECT id, directory, title, time_created, parent_id FROM session WHERE time_created >= ? ORDER BY time_created DESC').all(sinceMs)
     if (cwd) {
       const norm = (p) => String(p ?? '').replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase()
       const want = norm(cwd)
       rows = rows.filter((r) => norm(r.directory) === want)
     }
-    return rows.map((r) => ({ id: r.id, directory: r.directory, title: r.title, created: r.time_created }))
+    return rows.map((r) => ({ id: r.id, directory: r.directory, title: r.title, created: r.time_created, parentId: r.parent_id ?? null }))
   } finally { db.close() }
 }
 
@@ -75,12 +75,15 @@ export function sessionReport({ dbPath = DEFAULT_DB, sessionId } = {}) {
       if (d.tool !== 'Read') continue
       const input = st.input ?? {}
       const out = typeof st.output === 'string' ? st.output : ''
-      const isDeny = out.includes(GUARD_MARK)
+      // A denied call has status "error" with an empty output; the reason the
+      // model sees lives in metadata.modelContent (observed on ZCode 0.17.x).
+      const modelText = typeof st.metadata?.modelContent === 'string' ? st.metadata.modelContent : ''
+      const isDeny = out.includes(GUARD_MARK) || modelText.includes(GUARD_MARK)
       const rec = {
         path: input.file_path ?? input.filePath ?? input.path ?? null,
         partial: input.offset !== undefined || input.limit !== undefined || input.start_line !== undefined,
         wholeFile: input.offset === undefined && input.limit === undefined && input.start_line === undefined,
-        outputBytes: out.length,
+        outputBytes: Math.max(out.length, modelText.length),
         status: st.status ?? null,
         denied: isDeny,
       }

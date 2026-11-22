@@ -87,3 +87,16 @@ test('missing database reports ok:false instead of throwing', () => {
   assert.equal(r.ok, false)
   assert.match(r.error, /no database|not found/i)
 })
+
+test('deny detection reads metadata.modelContent when output is empty', () => {
+  const dbPath = fixtureDb()
+  const db = new DatabaseSync(dbPath)
+  db.prepare('INSERT INTO part VALUES (?,?,?,?)').run('p6', 'sess_a', 15, JSON.stringify({
+    type: 'tool', tool: 'Read',
+    state: { status: 'error', input: { file_path: 'D:/Projects/MemAI/src/page.mjs' }, output: '', metadata: { modelContent: '# MemAi guard — src/page.mjs withheld (50.1 KB ≈ 12926 tok)' } },
+  }))
+  db.close()
+  const r = sessionReport({ dbPath, sessionId: 'sess_a' })
+  assert.equal(r.ok, true)
+  assert.equal(r.denyCount, 2, 'p5 output form + p6 modelContent form')
+})

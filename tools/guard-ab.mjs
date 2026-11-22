@@ -20,10 +20,14 @@ const ZCODE = 'C:/Program Files/ZCode/resources/glm/zcode.cjs'
 const GUARD_JSON = path.join(ROOT, '.memai', 'guard.json')
 const OUT_DIR = path.join(ROOT, 'bench')
 
+// Question-style prompts on purpose: a task lets the model choose how to
+// gather information, which is what the guard is meant to change. An explicit
+// "read it in full" order tests obedience, not behaviour (measured: models
+// take the advertised override and pay deny + full read).
 export const TASKS = [
-  { id: 'T1', file: 'src/page.mjs', prompt: 'Read D:/Projects/MemAI/src/page.mjs in full, then list its five largest functions with line numbers. Do not modify files.' },
-  { id: 'T2', file: 'src/store.mjs', prompt: 'Read D:/Projects/MemAI/src/store.mjs in full, then summarize how symbolSearch ranks results. Do not modify files.' },
-  { id: 'T3', file: 'src/extract.mjs', prompt: 'Read D:/Projects/MemAI/src/extract.mjs in full, then summarize how symbols are extracted. Do not modify files.' },
+  { id: 'T1', file: 'src/page.mjs', prompt: 'In D:/Projects/MemAI/src/page.mjs, which function has the largest body by line span? Answer with its name and start/end line numbers.' },
+  { id: 'T2', file: 'src/store.mjs', prompt: 'How does symbolSearch in D:/Projects/MemAI/src/store.mjs rank results? Give the scoring terms and how idf is computed.' },
+  { id: 'T3', file: 'src/extract.mjs', prompt: 'Which symbol kinds does D:/Projects/MemAI/src/extract.mjs emit for markdown files, and what regex does it use?' },
 ]
 
 const setGuard = (enabled) => fs.writeFileSync(GUARD_JSON, JSON.stringify({ enabled, note: 'guard-ab arm control' }) + '\n')
@@ -33,7 +37,7 @@ function runOne(task) {
   const r = spawnSync(process.execPath, [ZCODE, '-p', task.prompt, '--cwd', ROOT], {
     cwd: ROOT, encoding: 'utf8', timeout: 600_000,
   })
-  const sessions = sessionsSince({ sinceMs: t0, cwd: ROOT })
+  const sessions = sessionsSince({ sinceMs: t0, cwd: ROOT }).filter((s) => !s.parentId)
   const s = sessions[0]
   if (!s) return { task: task.id, ok: false, error: 'no session recorded', exit: r.status }
   const rep = sessionReport({ sessionId: s.id })
@@ -74,7 +78,8 @@ function main() {
   for (const a of arms) {
     setGuard(a.enabled)
     for (const task of TASKS) {
-      const r = runOne(task)
+      let r = runOne(task)
+      if (r.billedInput === 0) r = runOne(task) // one transient empty run was observed
       rows.push({ ...r, arm: a.arm })
       process.stderr.write(`${a.arm} ${task.id}: billedIn=${r.billedInput} whole=${r.wholeFileReads} denies=${r.denies}\n`)
     }
