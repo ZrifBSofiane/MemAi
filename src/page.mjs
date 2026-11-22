@@ -20,7 +20,7 @@ import crypto from 'node:crypto'
 import { execFileSync } from 'node:child_process'
 import { sha1 } from './store.mjs'
 import { estTokens, clampText } from './tokens.mjs'
-import { EXTRACTOR_VERSION, KEYWORDS, langOf, isTestPath } from './extract.mjs'
+import { EXTRACTOR_VERSION, KEYWORDS, langOf, isTestPath, isDocPath } from './extract.mjs'
 
 export const DEFAULTS = {
   card: 700, map: 3500, get: 1200, fault: 600, query: 400, diff: 600, graph: 500, pack: 1500,
@@ -587,13 +587,30 @@ export class MemoryPages {
     if (body) {
       // Prefer a callable body, searched over the symbol pool (not just the
       // displayed hits): the top hit is often a const, and the function that
-      // answers "how does X work" can rank below the visible page.
-      const cands = this.store.symbolSearch(q, { limit: 20 })
-      const chosen = cands.find((s) => ['function', 'method', 'class'].includes(s.kind)) ?? cands[0]
+      // answers "how does X work" can rank below the visible page. Docs and
+      // tests are fallbacks: a README heading must not win over source code.
+      const terms = String(q).toLowerCase().split(/[^a-z0-9_$]+/i).filter((t) => t.length >= 2)
+      const all = this.store.symbolSearch(q, { limit: 20 })
+      const callables = all.filter((s) => ['function', 'method', 'class'].includes(s.kind))
+      const source = callables.filter((s) => !isTestPath(s.path) && !isDocPath(s.path))
+      const preferred = new Set(top.filter((h) => h.kind === 'page' && h.path).map((h) => h.path))
+      const score = (s) => {
+        const name = String(s.name).toLowerCase()
+        const sig = String(s.signature ?? '').toLowerCase()
+        let n = preferred.has(s.path) ? 5 : 0
+        for (const t of terms) {
+          if (name.includes(t)) n += 3
+          else if (sig.includes(t)) n += 1
+        }
+        return n
+      }
+      const pool = (source.length ? source : callables.length ? callables : all).slice()
+        .sort((a, b) => score(b) - score(a) || a.path.localeCompare(b.path) || a.line - b.line)
+      const chosen = pool[0]
       if (!chosen) {
         bodySection = { ok: false, error: 'no symbol hit; use get file:<path> for signatures' }
       } else {
-        const f = this.fault(chosen.name, { budget: DEFAULTS.fault })
+        const f = this.fault(`${chosen.path}#${chosen.name}`, { budget: DEFAULTS.fault })
         bodySection = f.ok
           ? { ok: true, target: chosen.name, symbol: chosen.name, path: f.path ?? chosen.path, tokens: f.tokens, text: f.text }
           : { ok: false, target: chosen.name, error: f.error }
