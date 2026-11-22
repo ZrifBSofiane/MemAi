@@ -73,7 +73,7 @@ Guard-specific (PreToolUse deny):
 | Agent | Contract | Status |
 | --- | --- | --- |
 | Claude Code | `permissionDecision: "deny"` + `permissionDecisionReason` under `hookSpecificOutput` | ✅ verified on 2.1.140 |
-| ZCode | same keys present in the installed runtime (`permissionDecision`, `permissionDecisionReason`, `"deny"`); `hooks.events.PreToolUse` accepts a process hook with a tool-name matcher | ✅ verified from the installed binary; live end-to-end not yet executed |
+| ZCode | same keys present in the installed runtime (`permissionDecision`, `permissionDecisionReason`, `"deny"`); `hooks.events.PreToolUse` accepts a process hook with a tool-name matcher | ✅ verified from the installed binary; **requires a UI trust grant** — an untrusted config entry is classified `workspace_hooks_pending_trust` and silently not run (measured 2026-11-22) |
 
 Note the argument names differ between Claude Code and ZCode (`command` shell string vs `process` +
 `args` argv). Do not copy one block to the other unchanged.

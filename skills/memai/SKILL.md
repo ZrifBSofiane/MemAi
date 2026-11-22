@@ -105,8 +105,9 @@ not, use the tool. Do not mix two stores.
 - **Large repos.** `map` is the most expensive page; prefer `query` when you can name the target.
 - **Whole-file reads are guarded.** Above the guard threshold (default 8 KB) a `Read` of an
   indexed file is denied with the signature page instead — that is the cheap path, not an
-  error. Call `fault <symbol>` for the body you need, or `Read` the same path again to
-  override for the session. `memai guard status` shows the effective config and denials.
+  error. Call `fault <symbol>` for the body you need; repeating the read stays denied
+  (ask a human to allow the path in `.memai/guard.json` or set `MEMAI_GUARD=off` if the
+  whole file is truly required). `memai guard status` shows the effective config and denials.
 
 ## Verify
 

@@ -124,24 +124,27 @@ moves), shaped like every other MemAi page:
 
 ```
 # MemAi guard — src/page.mjs withheld (18.2 KB ≈ 4,600 tok)
+Whole-file reads above 8.0 KB return signatures first.
 Signatures (index page):
   symbol map excerpts …
 Next moves:
   fault query              # one body slice (~300–600 tok)
   fault evaluate --deep    # body + callers
-  Read this path again     # override for this session
 ```
 
 The signature excerpt is the store's existing file page, clamped to 400 tokens;
 the suggested symbols are the first three non-heading symbols with lines. The
 override sentence is always present.
 
-## Override semantics
+## Override semantics (revised 0.5.1)
 
-- **Second attempt passes.** On deny, record `{session_id, path, ts}` in
-  `.memai/guard-state.json` (atomic write, 1 h TTL, pruned on write). A repeat
-  read of the same path in the same session allows. No state file interaction
-  on the allow path — the guard adds one `stat` and one store lookup to a read.
+The 0.5.0 design granted a repeat-read override (1 h TTL) and advertised it in the
+deny page. The live A/B (`bench/GUARD-LIVE-ANALYSIS.md`) showed models take the
+advertised offer immediately and pay deny + full read: **+62–65% billed input**.
+0.5.1 removes it:
+
+- **Repeat reads stay denied.** No session state grants a pass; the deny page
+  does not mention any override.
 - **Allowlist.** `guard.json` `allow` globs (project-relative, `**` supported)
   always pass.
 - **Kill switch.** `MEMAI_GUARD=off` disables the hook entirely.
@@ -174,7 +177,7 @@ follow-up the maintainer runs; it is not claimed by this design.
 | --- | --- |
 | CLI | `memai hook guard` in help; `memai guard status` prints effective config plus the deny count and last deny (allow decisions are never logged unless `MEMAI_DEBUG=1`) |
 | MCP | none — guard is a CLI-side hook |
-| skill (`skills/memai/SKILL.md`) | one line: reads above the guard threshold return signatures; read again to override |
+| skill (`skills/memai/SKILL.md`) | one line: reads above the guard threshold return signatures; repeats stay denied, config-level escapes only |
 | init template (`src/init.mjs`) | one line in the injected block |
 | adapters | `adapters/claude-code/settings-hooks.json` PreToolUse entry; `adapters/zcode/` PreToolUse snippet (verified shape); both READMEs state what was verified |
 | `docs/compatibility.md` | guard row per harness: verified / documented-only |

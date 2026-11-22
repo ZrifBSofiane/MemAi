@@ -18,7 +18,6 @@ export const GUARD_DEFAULTS = Object.freeze({
 })
 export const SIG_BUDGET = 400        // token budget of the signature excerpt
 export const FAULT_EST_TOKENS = 400  // one typical fault slice
-export const STATE_TTL_MS = 3600_000 // override lifetime
 
 /** Effective config: guard.json, then env overrides. Never throws. */
 export function loadGuardConfig({ root, env = process.env } = {}) {
@@ -79,14 +78,14 @@ export function isWholeFileRead(toolInput = {}) {
 
 export function statePath(root) { return path.join(root, '.memai', 'guard-state.json') }
 
-/** Deny/override state. Corrupt or missing file reads as empty. */
+/** Deny stats only. (0.5.1: the repeat-read override was removed — the live
+ *  A/B showed models take the advertised bypass and pay deny + full read.) */
 export function readState(root) {
   try {
     const raw = JSON.parse(fs.readFileSync(statePath(root), 'utf8'))
-    const overrides = raw?.overrides && typeof raw.overrides === 'object' ? raw.overrides : {}
-    return { version: 1, overrides, denyCount: Number(raw?.denyCount) || 0, lastDeny: raw?.lastDeny ?? null }
+    return { version: 1, denyCount: Number(raw?.denyCount) || 0, lastDeny: raw?.lastDeny ?? null }
   } catch {
-    return { version: 1, overrides: {}, denyCount: 0, lastDeny: null }
+    return { version: 1, denyCount: 0, lastDeny: null }
   }
 }
 
@@ -99,18 +98,9 @@ export function writeState(root, state) {
   fs.renameSync(tmp, p)
 }
 
-export function hasOverride(root, { sessionId, rel, now = Date.now(), ttlMs = STATE_TTL_MS }) {
-  const ts = readState(root).overrides[`${sessionId}|${rel}`]
-  return typeof ts === 'number' && now - ts < ttlMs
-}
-
-/** Record a deny and the one-shot override it grants for this session. */
-export function recordDeny(root, { sessionId, rel, now = Date.now(), bytes = 0, fileTokens = 0, sigTokens = 0, ttlMs = STATE_TTL_MS }) {
+/** Record a denial for `guard status`. No escape hatch is granted here. */
+export function recordDeny(root, { rel, now = Date.now(), bytes = 0, fileTokens = 0, sigTokens = 0 }) {
   const st = readState(root)
-  st.overrides[`${sessionId}|${rel}`] = now
-  for (const [k, ts] of Object.entries(st.overrides)) {
-    if (!(typeof ts === 'number' && now - ts < ttlMs)) delete st.overrides[k]
-  }
   st.denyCount += 1
   st.lastDeny = { rel, at: new Date(now).toISOString(), bytes, fileTokens, sigTokens }
   try { writeState(root, st) } catch { /* a guard must never fail the session */ }
@@ -133,12 +123,11 @@ export function buildDenyReason({ rel, bytes, fileTokens, sigText, sigTokens, mi
     .slice(0, 3)
   const lines = [
     `# MemAi guard — ${rel} withheld (${kb(bytes)} KB ≈ ${fileTokens} tok)`,
-    `Whole-file reads above ${kb(minBytes)} KB return signatures first; Read this path again to override for this session.`,
+    `Whole-file reads above ${kb(minBytes)} KB return signatures first.`,
     `Signatures (index page, ${sigTokens} tok):`,
     String(sigText ?? '').trim(),
     'Next moves:',
     ...syms.map((s, i) => `  fault ${s.name}${i === 0 ? '' : ' --deep'}   # ~300–600 tok`),
-    `  Read ${rel} again   # override`,
   ]
   return lines.join('\n')
 }
@@ -146,7 +135,7 @@ export function buildDenyReason({ rel, bytes, fileTokens, sigText, sigTokens, mi
 /**
  * The whole decision. Order is contractual (tests assert reasons):
  * enabled -> tool -> path -> root -> whole-file -> allowlist -> exists ->
- * minBytes -> indexed -> fresh -> page -> cost rule -> override.
+ * minBytes -> indexed -> fresh -> page -> cost rule.
  */
 export function decideGuard({ payload = null, root, env = process.env, cwd = process.cwd(), now = Date.now(), store, pages } = {}) {
   const cfg = loadGuardConfig({ root, env })
@@ -176,10 +165,7 @@ export function decideGuard({ payload = null, root, env = process.env, cwd = pro
   const fileTokens = Math.ceil(st.size / 3.966)
   if (fileTokens < 2 * (sig.tokens + FAULT_EST_TOKENS)) return { decision: 'allow', reason: 'paging would not halve the read' }
 
-  const sessionId = String(payload?.session_id ?? payload?.sessionId ?? 'anon')
-  if (hasOverride(root, { sessionId, rel, now })) return { decision: 'allow', reason: 'override' }
-
-  recordDeny(root, { sessionId, rel, now, bytes: st.size, fileTokens, sigTokens: sig.tokens })
+  recordDeny(root, { rel, now, bytes: st.size, fileTokens, sigTokens: sig.tokens })
   const text = buildDenyReason({ rel, bytes: st.size, fileTokens, sigText: sig.text, sigTokens: sig.tokens, minBytes: cfg.minBytes, store })
   return { decision: 'deny', rel, bytes: st.size, fileTokens, sigTokens: sig.tokens, text }
 }
