@@ -4,6 +4,22 @@ All notable changes to this project are documented here. The format is loosely
 based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the
 project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] — 2026-11-22
+
+Interception: the guardrail changes what the model does, not just what it can do.
+
+### Added
+
+- **`memai hook guard`** — a PreToolUse hook that denies whole-file reads above a
+  measured threshold (default 8 KB, `.memai/guard.json`) and returns the index's
+  signature page plus concrete `fault` next moves. Denies only where a full read
+  costs at least 2× the paged alternative; one repeat read overrides for the session
+  (1 h TTL); `MEMAI_GUARD=off` disables it. Silent allow by default, exit 0 always.
+- **`memai guard status`** — effective config, deny count, last denial.
+- **Adapter wiring** — `PreToolUse` for Claude Code (`settings-hooks.json`) and ZCode
+  (`config.json`), both verified against the harness contract.
+- **`bench/guard-sim.mjs`** — threshold simulation over the benchmark corpora.
+
 ## [0.4.0] — 2026-11-17
 
 The retrieval sprint: 50% → 100% recall@5 on the shipped fixtures — because

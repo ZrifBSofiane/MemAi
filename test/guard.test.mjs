@@ -219,3 +219,12 @@ test('shipped adapter configs register the guard on both harnesses', () => {
   assert.match(zcPre[0].matcher, /Read/)
   assert.ok(zcPre[0].hooks.some((h) => h.type === 'process' && h.args.join(' ').includes('hook guard')))
 })
+
+test('instruction surfaces mention the guard', async () => {
+  const skill = fs.readFileSync(path.join(REPO, 'skills/memai/SKILL.md'), 'utf8')
+  assert.match(skill, /guard/i)
+  const { instructionBlock } = await import('../src/init.mjs')
+  assert.match(instructionBlock({ agents: [] }), /guard/i)
+  const readme = fs.readFileSync(path.join(REPO, 'README.md'), 'utf8')
+  assert.match(readme, /memai hook guard|read guard/i)
+})
