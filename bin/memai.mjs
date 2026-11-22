@@ -42,6 +42,8 @@ Usage:
   memai hook card [--event E]     Print Claude Code SessionStart hook JSON with the
                                   project card as additionalContext (--text for raw text).
   memai hook index                PostToolUse: index the file an editing tool just wrote
+  memai hook guard                PreToolUse: deny above-threshold whole-file
+                             reads, returning signatures (silent = allow)
                                   (Claude-style JSON payload on stdin; silent; never fails).
   memai watch [--ensure|--stop|--status] [--debounce-ms N]
                                   Resident daemon: keep the store fresh by watching the tree.

@@ -190,3 +190,18 @@ test('CLI: no store -> silent allow', () => {
   assert.equal(r.status, 0)
   assert.equal(r.stdout, '')
 })
+
+test('CLI: guard status reports config and deny count', async () => {
+  const { root, store, pages } = await guardProject()
+  try {
+    decideGuard({ payload: readPayload('big.js'), root, env: {}, cwd: root, now: 9_000, store, pages })
+    const r = spawnSync(process.execPath, [SELF.bin, 'guard', 'status', '--root', root], { cwd: root, encoding: 'utf8', timeout: 60_000 })
+    assert.equal(r.status, 0, r.stderr)
+    const j = JSON.parse(r.stdout.trim())
+    assert.equal(j.ok, true)
+    assert.equal(j.guard.enabled, true)
+    assert.equal(j.guard.minBytes, 8192)
+    assert.equal(j.denyCount, 1)
+    assert.match(j.text, /guard — enabled/)
+  } finally { store.close() }
+})
