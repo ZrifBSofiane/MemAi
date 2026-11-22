@@ -43,6 +43,19 @@
             }
           ]
         }
+      ],
+      "PreToolUse": [
+        {
+          "matcher": "Read|read_file",
+          "hooks": [
+            {
+              "type": "process",
+              "command": "npx",
+              "args": ["-y", "-p", "memai-cli", "memai", "hook", "guard"],
+              "timeoutMs": 15000
+            }
+          ]
+        }
       ]
     }
   }

@@ -88,6 +88,23 @@ Notes:
 - Hook-time output goes to stdout only; MemAi writes diagnostics to stderr.
 - Docs: https://code.claude.com/docs/en/hooks (SessionStart, `hookSpecificOutput.additionalContext`).
 
+## PreToolUse read guard
+
+`settings-hooks.json` also registers `memai hook guard` on `PreToolUse` (matcher `Read`). A
+whole-file `Read` of an indexed file above the guard threshold (default 8 KB, tunable in
+`.memai/guard.json`) is denied with the signature page and concrete `fault` suggestions:
+
+```json
+{ "hookSpecificOutput": { "hookEventName": "PreToolUse", "permissionDecision": "deny",
+  "permissionDecisionReason": "# MemAi guard — src/page.mjs withheld (22.5 KB ≈ 5,800 tok) …" } }
+```
+
+`Read` on the same path again overrides for the session (1 h TTL); `MEMAI_GUARD=off` disables
+it; `memai guard status` prints the effective config and deny count. Reads below the threshold,
+partial reads (`offset`/`limit`), unindexed files and stale indexes are always allowed — paging
+those would cost more or serve wrong line numbers. Verified: deny +
+`permissionDecisionReason` on Claude Code 2.1.140.
+
 ## Skill
 
 The canonical skill is **not duplicated in this adapter**; the single source of truth is

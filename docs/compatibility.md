@@ -68,6 +68,13 @@ there is no card yet (silent no-op) and never creates/updates the store.
 | OpenCode | — | no documented config-level hook; MCP `instructions` used instead | n/a |
 | Codex | — | no stable user-facing context-injection hook documented | n/a |
 
+Guard-specific (PreToolUse deny):
+
+| Agent | Contract | Status |
+| --- | --- | --- |
+| Claude Code | `permissionDecision: "deny"` + `permissionDecisionReason` under `hookSpecificOutput` | ✅ verified on 2.1.140 |
+| ZCode | same keys present in the installed runtime (`permissionDecision`, `permissionDecisionReason`, `"deny"`); `hooks.events.PreToolUse` accepts a process hook with a tool-name matcher | ✅ verified from the installed binary; live end-to-end not yet executed |
+
 Note the argument names differ between Claude Code and ZCode (`command` shell string vs `process` +
 `args` argv). Do not copy one block to the other unchanged.
 

@@ -205,3 +205,17 @@ test('CLI: guard status reports config and deny count', async () => {
     assert.match(j.text, /guard — enabled/)
   } finally { store.close() }
 })
+
+test('shipped adapter configs register the guard on both harnesses', () => {
+  const cc = JSON.parse(fs.readFileSync(path.join(REPO, 'adapters/claude-code/settings-hooks.json'), 'utf8'))
+  const ccPre = cc.hooks.PreToolUse
+  assert.ok(Array.isArray(ccPre) && ccPre.length >= 1)
+  assert.match(ccPre[0].matcher, /Read/)
+  assert.ok(ccPre[0].hooks.some((h) => h.type === 'command' && h.command.includes('hook guard')))
+
+  const zc = JSON.parse(fs.readFileSync(path.join(REPO, 'adapters/zcode/config.json'), 'utf8'))
+  const zcPre = zc.hooks.events.PreToolUse
+  assert.ok(Array.isArray(zcPre) && zcPre.length >= 1)
+  assert.match(zcPre[0].matcher, /Read/)
+  assert.ok(zcPre[0].hooks.some((h) => h.type === 'process' && h.args.join(' ').includes('hook guard')))
+})
