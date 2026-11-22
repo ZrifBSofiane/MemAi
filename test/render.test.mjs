@@ -38,6 +38,8 @@ test('card carries the current project version for resume', async () => {
     assert.ok(m, `card has no version line:\n${card.text}`)
     const d = pages.diff({ since: m[1] })
     assert.equal(d.ok, true, d.error)
+    const tiny = pages.card({ budget: 40 })
+    assert.ok(tiny.tokens <= 40, `tiny card ${tiny.tokens} > 40`)
   } finally { store.close() }
 })
 

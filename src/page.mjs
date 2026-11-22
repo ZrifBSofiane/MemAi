@@ -189,14 +189,19 @@ export class MemoryPages {
   }
 
   card(opts = {}) {
-    const r = this.resolve('project.card', { budget: opts.budget ?? DEFAULTS.card, ...opts })
+    const budget = opts.budget ?? DEFAULTS.card
+    const r = this.resolve('project.card', { budget, ...opts })
     if (!r.ok) return r
     if (/^version: [0-9a-f]{8}$/m.test(r.text)) return r
     const latest = this.store.latestVersion()
     const v = latest?.version_hash?.slice(0, 8)
     if (!v) return r
+    // The version line is a convenience, not part of the page: never let it
+    // push a deliberately tiny card over its budget.
     const text = `${r.text}\nversion: ${v}`
-    return { ...r, text, tokens: estTokens(text) }
+    const tokens = estTokens(text)
+    if (tokens > budget) return r
+    return { ...r, text, tokens }
   }
   map(opts = {}) { return this.resolve('project.map', { budget: opts.budget ?? DEFAULTS.map, ...opts }) }
   get(pageId, opts = {}) {
