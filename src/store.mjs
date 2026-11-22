@@ -326,7 +326,7 @@ export class MemoryStore {
     for (const t of terms) {
       const rows = this.all(
         `SELECT name, kind, path, line, signature,
-                CASE WHEN lname = ? THEN 0 WHEN lname LIKE ? ESCAPE '\\' THEN 1 ELSE 2 END AS rank
+                CASE WHEN lname = ? THEN 0 WHEN ltrim(lname, '_') LIKE ? ESCAPE '\\' THEN 1 ELSE 2 END AS rank
          FROM symbols WHERE lname = ? OR lname LIKE ? ESCAPE '\\' OR lname LIKE ? ESCAPE '\\'
          ORDER BY rank, length(path), path, line LIMIT 200`,
         t, `${escapeLike(t)}%`, t, `${escapeLike(t)}%`, `%${escapeLike(t)}%`
@@ -339,7 +339,14 @@ export class MemoryStore {
         const bonus = (r.rank === 0 ? 1.2 : r.rank === 1 ? 0.9 : 0.4) * idf.get(t) * factor
         const cur = best.get(key)
         if (cur) cur.score = Math.round((cur.score + bonus) * 1000) / 1000
-        else best.set(key, { ...r, score: Math.round((bonus + (/(^|\/)test|\.test\.|spec\./i.test(r.path) ? -0.5 : 0)) * 1000) / 1000 })
+        else best.set(key, { ...r, score: Math.round(bonus * 1000) / 1000 })
+      }
+    }
+    // Test names are English prose (often whole sentences); a test that merely
+    // *describes* a feature must not outrank the implementation of it.
+    for (const r of best.values()) {
+      if (r.kind === 'test' || /(^|\/)(test|tests)\/|\.test\.|\.spec\./i.test(r.path)) {
+        r.score = Math.round(r.score * 0.4 * 1000) / 1000
       }
     }
     const scored = [...best.values()].sort((a, b) => b.score - a.score || a.path.length - b.path.length || a.path.localeCompare(b.path) || a.line - b.line)

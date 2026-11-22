@@ -278,6 +278,37 @@ test('exact symbol match survives prose-diluted idf', async () => {
   } finally { store.close() }
 })
 
+test('code evidence outranks docs and test pages; generic path words do not boost', async () => {
+  const dir = tempDir()
+  cleanup.push(dir)
+  const root = path.join(dir, 'project')
+  fs.mkdirSync(path.join(root, 'src'), { recursive: true })
+  fs.mkdirSync(path.join(root, 'docs'), { recursive: true })
+  fs.mkdirSync(path.join(root, 'test'), { recursive: true })
+  fs.writeFileSync(path.join(root, 'package.json'), '{"name":"rank-mix","version":"1.0.0","type":"module"}')
+  fs.writeFileSync(path.join(root, 'src', 'widget.js'), 'export function widgetRanker(items) { return items.sort() }\n')
+  fs.writeFileSync(path.join(root, 'docs', 'widget.md'), '# Widget\n\nThe widget ranker sorts widget items. Widget widget ranker.\n')
+  fs.writeFileSync(path.join(root, 'test', 'widget.test.js'), "import { widgetRanker } from '../src/widget.js'\n// test the widget ranker\n")
+  const store = new MemoryStore({ dbPath: path.join(root, '.memai', 'mem.db'), root })
+  store.setMeta('root', root)
+  const pages = new MemoryPages({ store, root })
+  await pages.index({ maxFiles: 500 })
+  try {
+    // The implementation symbol is the answer; the doc page and the test file
+    // merely mention the words. Assert on scores, not order — the order can be
+    // decided by a path-length tie-break even when all three score the same.
+    const r = pages.query('test widget ranker', { k: 10 })
+    const score = (base) => r.hits.find((h) => h.kind === 'page' && h.path.endsWith(base))?.score
+    const src = score('src/widget.js')
+    const doc = score('docs/widget.md')
+    const tst = score('test/widget.test.js')
+    assert.ok(src != null && doc != null && tst != null, `all three pages must be hits: ${JSON.stringify(r.hits)}`)
+    assert.ok(tst < src, `test page (${tst}) must score below the implementation (${src})`)
+    assert.ok(doc < src, `doc page (${doc}) must score below the implementation (${src})`)
+    assert.equal(r.hits[0].path, 'src/widget.js', `implementation should rank first: ${JSON.stringify(r.hits.slice(0, 4))}`)
+  } finally { store.close() }
+})
+
 test('multi-term code symbol beats generic single-term exact matches', async () => {
   const dir = tempDir()
   cleanup.push(dir)
@@ -308,5 +339,77 @@ test('multi-term code symbol beats generic single-term exact matches', async () 
     const r = pages.query('merkle version manifest', { k: 5 })
     assert.ok(r.hits.length >= 1)
     assert.equal(r.hits[0].path, 'src/store.js', `multi-term symbol should rank first: ${JSON.stringify(r.hits.slice(0, 3))}`)
+  } finally { store.close() }
+})
+
+test('test-name prose and doc headings rank below implementation symbols', async () => {
+  const dir = tempDir()
+  cleanup.push(dir)
+  const root = path.join(dir, 'project')
+  fs.mkdirSync(path.join(root, 'src'), { recursive: true })
+  fs.mkdirSync(path.join(root, 'test'), { recursive: true })
+  fs.mkdirSync(path.join(root, 'docs'), { recursive: true })
+  fs.writeFileSync(path.join(root, 'package.json'), '{"name":"prose-rank","version":"1.0.0","type":"module"}')
+  fs.writeFileSync(path.join(root, 'src', 'graph.js'), 'export function blastRadius(target) { return target }\n')
+  // A test whose *name* is a sentence containing the query words.
+  fs.writeFileSync(path.join(root, 'test', 'graph.test.js'), "test('blast radius transitive importers', () => {})\n")
+  // A doc heading that mentions the same words.
+  fs.writeFileSync(path.join(root, 'docs', 'graph.md'), '# Blast radius transitive importers\n\nProse.\n')
+  const store = new MemoryStore({ dbPath: path.join(root, '.memai', 'mem.db'), root })
+  store.setMeta('root', root)
+  const pages = new MemoryPages({ store, root })
+  await pages.index({ maxFiles: 500 })
+  try {
+    const r = pages.query('blast radius transitive importers', { k: 5 })
+    assert.equal(r.hits[0].path, 'src/graph.js', `implementation must win: ${JSON.stringify(r.hits.slice(0, 4).map((h) => [h.path, h.symbol, h.score]))}`)
+  } finally { store.close() }
+})
+
+test('query --body returns hits and the top symbol body in one call', async () => {
+  const { store, pages } = await project()
+  try {
+    const r = pages.query('verifyToken', { k: 3, body: true })
+    assert.ok(r.body, 'body section present')
+    assert.equal(r.body.ok, true)
+    assert.equal(r.body.symbol, 'verifyToken')
+    assert.match(r.body.text, /token\.split/)
+    assert.ok(r.body.tokens > 0)
+    assert.ok(r.text.includes('body:'), 'text carries the body section')
+    // Without the flag the envelope is unchanged.
+    const plain = pages.query('verifyToken', { k: 3 })
+    assert.equal(plain.body, undefined)
+  } finally { store.close() }
+})
+
+test('fault and get accept comma-separated batches', async () => {
+  const { store, pages } = await project()
+  try {
+    const f = pages.fault('verifyToken,issueToken', { budget: 600 })
+    assert.equal(f.ok, true)
+    assert.equal(f.results.length, 2)
+    assert.deepEqual(f.results.map((x) => x.symbol), ['verifyToken', 'issueToken'])
+    assert.match(f.text, /verifyToken/)
+    assert.match(f.text, /issueToken/)
+
+    const g = pages.get('file:src/auth.js,file:src/billing.js', { budget: 800 })
+    assert.equal(g.ok, true)
+    assert.equal(g.results.length, 2)
+    assert.match(g.text, /auth\.js/)
+    assert.match(g.text, /billing\.js/)
+  } finally { store.close() }
+})
+
+test('CLI: query --body and comma batches wire through', async () => {
+  const { root, store } = await project()
+  try {
+    const r = await runNode([SELF.bin, 'query', 'verifyToken', '--body', '--root', root], { cwd: root })
+    assert.equal(r.code, 0, r.stderr)
+    const j = JSON.parse(r.stdout.trim())
+    assert.equal(j.body.ok, true)
+    assert.match(j.body.text, /token/)
+
+    const f = await runNode([SELF.bin, 'fault', 'verifyToken,issueToken', '--root', root], { cwd: root })
+    assert.equal(f.code, 0, f.stderr)
+    assert.equal(JSON.parse(f.stdout.trim()).results.length, 2)
   } finally { store.close() }
 })

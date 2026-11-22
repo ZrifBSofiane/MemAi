@@ -107,7 +107,9 @@ Across **six questions** spanning task types:
   undirected mode. `affected <target>` adds transitive blast radius in one
   page.
 - Self-measured retrieval (`memai eval`, 12 shipped fixtures): recall@5
-  **100%**, MRR 0.69 (index) / 0.70 (hybrid).
+  **100%**, MRR **0.80** (index) / **0.73** (hybrid). A 40-fixture development
+  matrix (`bench/eval-fixtures-ext.json`, not the public baseline) scores 85% /
+  93% and is what the ranking changes below are validated against.
 - Where graphify genuinely wins: architecture-wide discovery (community
   detection, god nodes), mixed corpora (papers, images, video), cross-repo
   merged graphs, and human-facing HTML/GraphRAG exports. MemAi does none of
@@ -205,7 +207,9 @@ npx -y memai-cli index
 # 3. Use it
 npx -y memai-cli card                  # ~200-token orientation, once per session
 npx -y memai-cli query "where is auth checked"
+npx -y memai-cli query "verify token" --body   # locate + the top symbol body, one call
 npx -y memai-cli fault verifyToken     # one body slice, budget-clamped
+npx -y memai-cli fault verifyToken,issueToken  # batch: several slices, one call
 npx -y memai-cli diff --since <version>  # on the next session / in a subagent
 ```
 

@@ -55,6 +55,9 @@ the alternative is reading whole files into context.
    MCP instructions; if it is in context, skip this step.
 2. **Locate.** `{"op":"query","q":"verify token"}` (CLI: `memai query "verify token"`) returns
    ranked pages and symbols with snippets. Do not read content with `query`; it is a finder.
+   Add `"body": true` (CLI `--body`) to get the top symbol's body in the same call — one model
+   turn instead of query + fault. Comma-separated targets batch too: `fault a,b,c`,
+   `get file:a.js,file:b.js`.
 3. **Page.** Fetch one slice:
    - `{"op":"fault","target":"verifyToken"}` — one symbol body.
    - `{"op":"fault","target":"src/auth.js:120"}` — one line range.
