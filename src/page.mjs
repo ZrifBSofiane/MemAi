@@ -603,8 +603,21 @@ export class MemoryPages {
       // answers "how does X work" can rank below the visible page. Docs and
       // tests are fallbacks: a README heading must not win over source code.
       const terms = String(q).toLowerCase().split(/[^a-z0-9_$]+/i).filter((t) => t.length >= 2)
-      const all = this.store.symbolSearch(q, { limit: 20 })
+      const all = this.store.symbolSearch(q, { limit: 40 })
       const callables = all.filter((s) => ['function', 'method', 'class'].includes(s.kind))
+      // A natural-language question can rank 40 docs symbols ahead of the
+      // source function that answers it. Add the callables of the top source
+      // pages so the right file's functions are in the pool even when their
+      // names do not match the query terms.
+      for (const p of this.store.searchPages(q, { limit: 40 })) {
+        if (!p.pageId.startsWith('file:') || !p.path || isTestPath(p.path) || isDocPath(p.path)) continue
+        for (const s of this.store.symbolsForPage(p.pageId)) {
+          if (!['function', 'method', 'class'].includes(s.kind)) continue
+          if (callables.some((c) => c.path === p.path && c.name === s.name)) continue
+          callables.push({ ...s, path: p.path })
+        }
+        if (callables.length > 120) break
+      }
       const source = callables.filter((s) => !isTestPath(s.path) && !isDocPath(s.path))
       const preferred = new Set(top.filter((h) => h.kind === 'page' && h.path).map((h) => h.path))
       const score = (s) => {

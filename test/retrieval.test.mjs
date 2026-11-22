@@ -448,12 +448,10 @@ test('query --body prefers the matching source callable over docs headings', asy
   const root = path.join(dir, 'project')
   fs.mkdirSync(path.join(root, 'src'), { recursive: true })
   fs.writeFileSync(path.join(root, 'package.json'), '{"name":"body-docs","version":"1.0.0","type":"module"}')
-  fs.writeFileSync(path.join(root, 'README.md'), [
-    '# How does the watcher debounce work?',
-    '',
-    'This page explains the watcher debounce design.',
-    '',
-  ].join('\n'))
+  const docs = ['# How does the watcher debounce work?', '']
+  for (let i = 0; i < 25; i++) docs.push(`## Watcher debounce work ${i}`, '')
+  docs.push('This page explains the watcher debounce design.', '')
+  fs.writeFileSync(path.join(root, 'README.md'), docs.join('\n'))
   fs.writeFileSync(path.join(root, 'src', 'watch.js'), [
     'export const DEBOUNCE_MS = 800',
     'export function startWatcher() {',

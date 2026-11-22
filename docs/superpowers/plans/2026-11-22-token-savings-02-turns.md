@@ -632,7 +632,7 @@ In `tools/cost-ab.mjs`, add to `TASK_SETS` after `payload`:
       requireCli: true,
       requireFewerCalls: true,
       expect: /watch\.mjs/,
-      prompt: 'Use exactly one local CLI call: `node bin/memai.mjs query "unref" --text`. Answer with the file path that contains that token. Do not use the MCP tool, a globally installed `memai`, or grep.',
+      prompt: 'Use exactly one local CLI call: `node bin/memai.mjs query "breakerLogged" --text`. Answer with the file path that contains that token. Do not use the MCP tool, a globally installed `memai`, or grep.',
     },
   ],
 ```

@@ -17,8 +17,8 @@ release of the round.
   accepts it (prefix resolution added to `store.getVersion`; the CLI already
   printed 12-char prefixes that did not resolve).
 - **Auto-rg.** A zero-hit `query` runs the ripgrep pass and returns
-  `rgNote: "auto-rg: …"`. In this repo, `query "unref"` returns the body line
-  from `src/watch.mjs` in one call.
+  `rgNote: "auto-rg: …"`. A body-only token in `src/watch.mjs` is returned in
+  one call without an explicit `rg` flag.
 - **Eval.** Shipped recall@5 100 %; extended 85 % index / 90 % hybrid. Recall is
   unchanged from the harness tree; the MRR values (0.74 / 0.67 and 0.58 / 0.54)
   are the same-tree numbers after the plan/spec docs entered the corpus.
