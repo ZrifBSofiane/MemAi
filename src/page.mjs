@@ -27,17 +27,40 @@ export const DEFAULTS = {
 }
 export const PAGE_KINDS = ['project.card', 'project.map', 'file:<path>', 'board:<topic>']
 
+// Words that name a *role*, not a specific file: a query containing "test",
+// "file" or "index" must not boost every test/file/index path in the repo.
+const GENERIC_PATH_TOKENS = new Set([
+  'test', 'tests', 'spec', 'specs', 'index', 'main', 'src', 'lib', 'libs', 'app', 'core',
+  'util', 'utils', 'helper', 'helpers', 'data', 'file', 'files', 'path', 'paths', 'docs',
+  'doc', 'page', 'pages', 'code', 'type', 'types', 'base', 'common', 'new', 'read', 'write',
+  'tool', 'tools',
+])
+
 /** File-name boost: a query term that names the file is strong file-level
- *  evidence (exact basename token > prefix, e.g. `watcher` ~ `watch.mjs`). */
+ *  evidence (exact basename token > prefix, e.g. `watcher` ~ `watch.mjs`).
+ *  Generic role words are ignored so "test"/"path" cannot boost half the repo;
+ *  test files never earn it — a test's name is not implementation evidence. */
 function pathBoost(p, terms) {
   if (!p || !terms?.length) return 0
+  if (/(^|\/)(test|tests)\/|\.test\.|\.spec\./i.test(p)) return 0
   const stem = String(p).replace(/.*\//, '').toLowerCase().replace(/\.[a-z0-9]+$/, '')
   const tokens = stem.split(/[^a-z0-9_$]+/).filter(Boolean)
   for (const t of terms) {
+    if (GENERIC_PATH_TOKENS.has(t)) continue
     if (tokens.includes(t)) return 3
     if (t.length >= 4 && tokens.some((k) => k.startsWith(t) || t.startsWith(k))) return 2
   }
   return 0
+}
+
+/** Page-hit score. Pages are coarse evidence (any term in a big page), so their
+ *  base sits below precise symbol hits; docs and tests are context, not the
+ *  implementation, and rank below code. */
+function pageScore(p, terms) {
+  let s = 0.6 + pathBoost(p, terms)
+  if (/(^|\/)(test|tests)\/|\.test\.|\.spec\./i.test(p)) s -= 0.3
+  else if (/\.(md|markdown)$/i.test(p) || /(^|\/)(docs?|README|PROTOCOL|CHANGELOG)/i.test(p)) s -= 0.2
+  return Math.round(Math.max(0, s) * 1000) / 1000
 }
 
 const fitWithHeader = (bodyText, budget, makeHeader) => {
@@ -167,7 +190,23 @@ export class MemoryPages {
 
   card(opts = {}) { return this.resolve('project.card', { budget: opts.budget ?? DEFAULTS.card, ...opts }) }
   map(opts = {}) { return this.resolve('project.map', { budget: opts.budget ?? DEFAULTS.map, ...opts }) }
-  get(pageId, opts = {}) { return this.resolve(pageId, { budget: opts.budget ?? DEFAULTS.get }) }
+  get(pageId, opts = {}) {
+    // Batch: `get file:a,file:b` returns several pages in one model turn.
+    if (typeof pageId === 'string' && pageId.includes(',')) {
+      const ids = pageId.split(',').map((s) => s.trim()).filter(Boolean).slice(0, 5)
+      if (ids.length > 1) {
+        const total = opts.budget ?? DEFAULTS.get
+        const each = Math.max(200, Math.floor(total / ids.length))
+        const results = ids.map((id) => this.resolve(id, { budget: each }))
+        return {
+          ok: results.every((r) => r.ok), batch: true, results, budget: total,
+          tokens: results.reduce((a, r) => a + (r.tokens || 0), 0),
+          text: results.map((r) => r.text ?? `# ${r.error}`).join('\n\n'),
+        }
+      }
+    }
+    return this.resolve(pageId, { budget: opts.budget ?? DEFAULTS.get })
+  }
 
   // ---------------------------------------------------------------- delta ---
 
@@ -257,6 +296,20 @@ export class MemoryPages {
 
   /** Demand-page one slice: symbol name, path#symbol, path:line, or path page. `--deep` adds one-hop context. */
   fault(target, { budget = DEFAULTS.fault, deep = false } = {}) {
+    // Batch: `fault a,b,c` answers several symbols in one model turn. Each
+    // slice gets an equal share of the budget (never below 200 tokens).
+    if (typeof target === 'string' && target.includes(',')) {
+      const parts = target.split(',').map((s) => s.trim()).filter(Boolean).slice(0, 5)
+      if (parts.length > 1) {
+        const each = Math.max(200, Math.floor(budget / parts.length))
+        const results = parts.map((p) => this.fault(p, { budget: each, deep }))
+        return {
+          ok: results.every((r) => r.ok), batch: true, results, budget,
+          tokens: results.reduce((a, r) => a + (r.tokens || 0), 0),
+          text: results.map((r) => r.text ?? `# ${r.error}`).join('\n\n'),
+        }
+      }
+    }
     target = normPath(target)
     if (!target) return { ok: false, error: 'empty fault target', tokens: 0 }
     if (target.startsWith('file:')) target = target.slice(5)
@@ -472,7 +525,7 @@ export class MemoryPages {
   /** Ranked, compact hits: IDF-weighted symbols, FTS pages and (with `--rg`)
    *  body lines all compete in one score-sorted pool, so rare-term evidence can
    *  surface a file the index alone buried. */
-  query(q, { k = 5, budget = DEFAULTS.query, kind = null, rg = false } = {}) {
+  query(q, { k = 5, budget = DEFAULTS.query, kind = null, rg = false, body = false } = {}) {
     const terms = String(q).toLowerCase().split(/[^a-z0-9_$]+/i).filter((t) => t.length >= 2).slice(0, 6)
     const hits = []
     const seen = new Set()
@@ -482,13 +535,16 @@ export class MemoryPages {
       seen.add(key)
       hits.push(h)
     }
-    for (const s of this.store.symbolSearch(q, { limit: k })) {
+    // Fetch a k-independent pool: page hits are re-scored below, so truncating
+    // at k*2 beforehand would make the *set* of hits depend on k (a page could
+    // appear at k=8 but vanish at k=5). Symbols are already fully ranked.
+    for (const s of this.store.symbolSearch(q, { limit: Math.max(k, 8) })) {
       push({ pageId: `file:${s.path}`, kind: 'symbol', path: s.path, symbol: s.name, symbolKind: s.kind, line: s.line, snippet: s.signature, score: s.score })
     }
-    for (const p of this.store.searchPages(q, { limit: k * 2 })) {
+    for (const p of this.store.searchPages(q, { limit: Math.max(40, k * 8) })) {
       if (kind && !p.pageId.startsWith(kind)) continue
       if (p.pageId.startsWith('file:')) {
-        push({ pageId: p.pageId, kind: 'page', path: p.path, symbol: null, line: null, snippet: p.snippet, score: Math.round((1 + pathBoost(p.path, terms)) * 1000) / 1000 })
+        push({ pageId: p.pageId, kind: 'page', path: p.path, symbol: null, line: null, snippet: p.snippet, score: pageScore(p.path, terms) })
       }
     }
     let rgNote = null
@@ -518,12 +574,36 @@ export class MemoryPages {
     }
     const lines = [`# query "${q}" — ${top.length} hit${top.length === 1 ? '' : 's'} (use fault <symbol> or get <pageId>)`]
     for (const h of top) {
-      lines.push(`${h.symbol ? 'sym' : h.kind === 'text' ? 'text' : 'page'} ${h.pageId}${h.line ? `:${h.line}` : ''}  ${h.symbol ? `${h.symbolKind} ${h.symbol}: ` : ''}${(h.snippet || '').slice(0, 120)}${h.stale ? '  [STALE]' : ''}`)
+      lines.push(`${h.symbol ? 'sym' : h.kind === 'text' ? 'text' : 'page'} ${h.pageId}${h.line ? `:${h.line}` : ''}  ${h.symbol ? `${h.symbolKind} ${h.symbol}: ` : ''}${(h.snippet || '').slice(0, 80)}${h.stale ? '  [STALE]' : ''}`)
     }
     if (!top.length) lines.push('(no hits — try a broader term or `map`)')
     if (rgNote) lines.push(`(${rgNote})`)
     const r = clampText(lines.join('\n'), budget)
-    return { ok: true, query: q, hits: top, count: top.length, rgNote, tokens: r.tokens, budget, truncated: r.truncated, text: r.text }
+    // `--body`: locate *and* materialise the top symbol body in one call,
+    // saving a whole model turn (the dominant cost, not the page tokens).
+    let bodySection = null
+    let text = r.text
+    let tokens = r.tokens
+    if (body) {
+      // Prefer a callable body, searched over the symbol pool (not just the
+      // displayed hits): the top hit is often a const, and the function that
+      // answers "how does X work" can rank below the visible page.
+      const cands = this.store.symbolSearch(q, { limit: 20 })
+      const chosen = cands.find((s) => ['function', 'method', 'class'].includes(s.kind)) ?? cands[0]
+      if (!chosen) {
+        bodySection = { ok: false, error: 'no symbol hit; use get file:<path> for signatures' }
+      } else {
+        const f = this.fault(chosen.name, { budget: DEFAULTS.fault })
+        bodySection = f.ok
+          ? { ok: true, target: chosen.name, symbol: chosen.name, path: f.path ?? chosen.path, tokens: f.tokens, text: f.text }
+          : { ok: false, target: chosen.name, error: f.error }
+        if (bodySection.ok) {
+          text += `\n\nbody: ${bodySection.symbol} (${bodySection.tokens} tok)\n${bodySection.text}`
+          tokens += bodySection.tokens
+        }
+      }
+    }
+    return { ok: true, query: q, hits: top, count: top.length, rgNote, body: body ? bodySection : undefined, tokens, budget, truncated: r.truncated, text }
   }
 
   // ---------------------------------------------------------------- graph ---

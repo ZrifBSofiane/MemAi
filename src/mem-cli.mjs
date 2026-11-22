@@ -11,7 +11,7 @@ import { MemoryStore } from './store.mjs'
 import { MemoryPages, DEFAULTS } from './page.mjs'
 import { estTokens } from './tokens.mjs'
 
-export const VERSION = '0.6.0'
+export const VERSION = '0.7.0'
 
 const HELP = `MemAi CLI  (tokens are the currency; every response has a token count)
 
@@ -34,10 +34,13 @@ const HELP = `MemAi CLI  (tokens are the currency; every response has a token co
   eval [--fixtures FILE] [--k 5] [--modes index,hybrid]  retrieval quality harness;
                              fixtures: [{"q":"...","expect":"src/x.js"}], default .memai/eval.json
   get <pageId> [--budget 1200]    page text (file:<path> | project.card | project.map | board:<t>)
-  query <terms> [--k 5] [--budget 400] [--rg]   ranked hits, snippets only;
+                                 comma-separate to batch: get file:a.js,file:b.js
+  query <terms> [--k 5] [--budget 400] [--rg] [--body]   ranked hits, snippets only;
                                  --rg unions a ripgrep body sweep (catches what the index does not page)
+                                 --body also returns the top symbol's body (one call, one turn)
   fault <sym | path#sym | path:line | path> [--budget 600] [--deep]   one slice;
                                  --deep appends callees + best-effort callers
+                                 comma-separate to batch: fault a,b,c
   miss "<query>" [--found-by T] [--path P] [--agent A]   log a retrieval miss (recall data)
   miss --stats                    miss counts, top missed queries, per-tool breakdown
   note <topic> <body> [--agent A]        append to shared board (deduped)
@@ -63,6 +66,7 @@ Examples:
 const BOOLEAN_FLAGS = new Set([
   'json', 'text', 'force', 'no-stale', 'read-only', 'rg', 'deep', 'stats',
   'last', 'checkpoint', 'shortest', 'no-card', 'global', 'link', 'md', 'purge', 'missing-only',
+  'body',
 ])
 
 function parseArgv(argv) {
@@ -174,8 +178,8 @@ export async function run(argv, { env = null } = {}) {
       }
       case 'query': {
         const q = positional.slice(1).join(' ')
-        if (!q) return { ok: false, cmd, error: 'usage: query <terms> [--rg] [--k N]', tokens: 0 }
-        return { ok: true, cmd, ...pages.query(q, { k: num(flags.k, 5), budget: num(flags.budget, DEFAULTS.query), rg: !!flags.rg }) }
+        if (!q) return { ok: false, cmd, error: 'usage: query <terms> [--rg] [--k N] [--body]', tokens: 0 }
+        return { ok: true, cmd, ...pages.query(q, { k: num(flags.k, 5), budget: num(flags.budget, DEFAULTS.query), rg: !!flags.rg, body: !!flags.body }) }
       }
       case 'fault': {
         const target = positional.slice(1).join(' ')

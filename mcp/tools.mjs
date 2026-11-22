@@ -77,6 +77,7 @@ function memInputSchema() {
       q: { type: 'string', description: 'query: search terms or a symbol name. miss: the query that failed.' },
       k: { type: 'integer', minimum: 1, maximum: 20, description: 'query: number of ranked hits (default 5).' },
       rg: { type: 'boolean', description: 'query: also union a ripgrep pass over file bodies (ground-truth net for content the index does not page).' },
+      body: { type: 'boolean', description: 'query: also return the top symbol body in the same call — locate and read in one model turn.' },
       deep: { type: 'boolean', description: 'fault: append one-hop context (callees + best-effort callers).' },
       foundBy: { type: 'string', description: 'miss: which tool found it (rg | grep | manual).' },
       hitPath: { type: 'string', description: 'miss: where it was found (path or page id).' },
@@ -88,7 +89,7 @@ function memInputSchema() {
       faults: { type: 'string', description: 'pack: comma-separated symbols to include as short slices.' },
       last: { type: 'boolean', description: 'diff: diff since the last checkpoint for your agent (use diff checkpoint:true first).' },
       checkpoint: { type: 'boolean', description: 'diff: record the current version for your agent so a later last:true can resume.' },
-      pageId: { type: 'string', description: 'get: file:<path> | project.card | project.map | board:<topic>.' },
+      pageId: { type: 'string', description: 'get: file:<path> | project.card | project.map | board:<topic>. Comma-separate to batch several pages.' },
       since: { type: 'string', description: 'diff: previous project version hash; omit to just see the current version.' },
       topic: { type: 'string', description: 'note/post/inbox: board topic (e.g. handoff, review:auth).' },
       body: { type: 'string', description: 'note/post: message body. Send page ids and symbol names, never file bodies.' },
@@ -134,17 +135,17 @@ const granularSpec = [
   },
   {
     name: 'mem_query', op: 'query', title: 'MemAi: ranked search',
-    description: 'Ranked symbol/page hits with snippets, no bodies (default ~65 tokens); rg: true unions a ripgrep body sweep for content the index does not page. Use to locate a symbol or feature, then fetch the winner with mem_fault. Do not use it to read content; do not run many tiny queries instead of one full read.',
-    inputSchema: { type: 'object', properties: { q: { type: 'string' }, k: { type: 'integer', minimum: 1, maximum: 20 }, rg: { type: 'boolean' }, budget: { type: 'integer', minimum: 1, maximum: 1200 } }, required: ['q'], additionalProperties: false },
+    description: 'Ranked symbol/page hits with snippets, no bodies (default ~65 tokens); rg: true unions a ripgrep body sweep for content the index does not page; body: true also returns the top symbol body — locate and read in one call. Use to locate a symbol or feature, then fetch the winner with mem_fault. Do not run many tiny queries instead of one full read.',
+    inputSchema: { type: 'object', properties: { q: { type: 'string' }, k: { type: 'integer', minimum: 1, maximum: 20 }, rg: { type: 'boolean' }, body: { type: 'boolean' }, budget: { type: 'integer', minimum: 1, maximum: 1200 } }, required: ['q'], additionalProperties: false },
   },
   {
     name: 'mem_fault', op: 'fault', title: 'MemAi: page one slice',
-    description: `Demand-page exactly one symbol body / line range / file page under a token budget; deep: true appends callees and best-effort callers. This is the default way to read code: prefer it over reading whole files. ${WHEN_NOT_USE} If you need the whole file anyway, read it directly.`,
+    description: `Demand-page exactly one symbol body / line range / file page under a token budget; deep: true appends callees and best-effort callers. Comma-separated targets batch several slices into one call. This is the default way to read code: prefer it over reading whole files. ${WHEN_NOT_USE} If you need the whole file anyway, read it directly.`,
     inputSchema: { type: 'object', properties: { target: { type: 'string' }, deep: { type: 'boolean' }, budget: { type: 'integer', minimum: 1, maximum: 2500 } }, required: ['target'], additionalProperties: false },
   },
   {
     name: 'mem_get', op: 'get', title: 'MemAi: read a page',
-    description: 'Read a page by id: file:<path> gives signatures (~10-30% of the file), board:<topic> gives shared state, project.card/map give aggregates. Use before a fault to see what symbols exist. Do not use it for a single small file.',
+    description: 'Read a page by id: file:<path> gives signatures (~10-30% of the file), board:<topic> gives shared state, project.card/map give aggregates. Comma-separate page ids to batch several pages into one call. Use before a fault to see what symbols exist. Do not use it for a single small file.',
     inputSchema: { type: 'object', properties: { pageId: { type: 'string' }, budget: { type: 'integer', minimum: 1, maximum: 4000 } }, required: ['pageId'], additionalProperties: false },
   },
   {
@@ -302,7 +303,7 @@ export async function dispatch({ root = null, db = null, env = process.env, cwd 
       case 'query': {
         const q = str(args.q)
         if (!q) return errorResult(op, 'query requires q (search terms or a symbol name)')
-        return toToolResult(op, pages.query(q, { k: clampInt(args.k, 5, 1, 20), budget: budgetFor('query', args), rg: !!args.rg }))
+        return toToolResult(op, pages.query(q, { k: clampInt(args.k, 5, 1, 20), budget: budgetFor('query', args), rg: !!args.rg, body: !!args.body }))
       }
       case 'fault': {
         const target = str(args.target)

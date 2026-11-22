@@ -4,6 +4,40 @@ All notable changes to this project are documented here. The format is loosely
 based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the
 project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0] — 2026-11-22
+
+Round-trip reduction: fewer model turns per question — the cost that dominates
+billed input (a turn re-sends the whole context; page tokens are noise beside it).
+
+### Added
+
+- **`query --body`** (`"body": true`) — returns the top symbol's body together
+  with the ranked hits: locate and read in one call, one model turn instead of two.
+- **Batched slices** — `fault a,b,c` and `get file:a.js,file:b.js` return several
+  slices in one call, sharing the budget (min 200 tokens per slice).
+
+### Changed (retrieval ranking)
+
+- Page hits score 0.6 + filename boost (was a flat 1), so precise symbol evidence
+  outranks coarse page matches; docs pages −0.2, test pages −0.3 and never get the
+  filename boost.
+- Generic role words (test, file, path, index, tool, …) no longer boost a filename;
+  test-name prose is demoted ×0.4; private `_methods` match prefixes.
+- `query` fetches a k-independent candidate pool — the set of hits no longer
+  changes with `k`; locator previews are 80 chars (was 120), trimming every
+  query response.
+
+### Eval
+
+- Shipped 12 fixtures: **100% recall@5** both modes, MRR **0.80** index / **0.73**
+  hybrid (was 0.69 / 0.70).
+- New development matrix `bench/eval-fixtures-ext.json` (40 fixtures across every
+  subsystem): **85% index / 93% hybrid** — it surfaced the ranking gaps fixed above.
+  The shipped 12 remain the public baseline, unchanged.
+- Head-to-head re-run (`bench/BENCHMARK-0.7.0.md`): **1,438 vs 4,159** (~2.9×),
+  plus a same-tree A/B of 0.5.0 vs 0.7.0 code: **1,461 → 1,438 (−23, −1.6%)**,
+  with no task more expensive.
+
 ## [0.6.0] — 2026-11-22
 
 ### Removed
