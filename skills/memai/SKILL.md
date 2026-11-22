@@ -66,7 +66,7 @@ the alternative is reading whole files into context.
 4. **Resume.** With a version hash from the last session: `{"op":"diff","since":"<version>"}`
    (CLI `memai diff --since <version>`). Re-index locally after edits with `{"op":"index"}` or
    `memai index` (no model tokens).
-5. **Share.** `{"op":"note","topic":"handoff","body":"auth move: see file:src/auth.js"}`,
+5. **Share.** `{"op":"note","topic":"handoff","content":"auth move: see file:src/auth.js"}`,
    `{"op":"post",...}`, `{"op":"inbox","agent":"<id>"}`; CLI `memai note/post/inbox`.
 
 If MCP is unavailable, every step has a CLI equivalent. If the CLI is unavailable but MCP is

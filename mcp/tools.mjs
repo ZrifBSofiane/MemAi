@@ -91,8 +91,9 @@ function memInputSchema() {
       checkpoint: { type: 'boolean', description: 'diff: record the current version for your agent so a later last:true can resume.' },
       pageId: { type: 'string', description: 'get: file:<path> | project.card | project.map | board:<topic>. Comma-separate to batch several pages.' },
       since: { type: 'string', description: 'diff: previous project version hash; omit to just see the current version.' },
+      sinceSeq: { type: 'integer', minimum: 0, description: 'inbox: read messages after this sequence number (default 0).' },
       topic: { type: 'string', description: 'note/post/inbox: board topic (e.g. handoff, review:auth).' },
-      body: { type: 'string', description: 'note/post: message body. Send page ids and symbol names, never file bodies.' },
+      content: { type: 'string', description: 'note/post: message body. Send page ids and symbol names, never file bodies.' },
       agent: { type: 'string', description: 'note/post/inbox: your agent id (default: $MEMAI_AGENT or "anon").' },
       advance: { type: 'boolean', description: 'inbox: advance the read cursor (default true).' },
     },
@@ -323,7 +324,7 @@ export async function dispatch({ root = null, db = null, env = process.env, cwd 
       case 'note':
       case 'post': {
         const topic = str(args.topic)
-        const body = typeof args.body === 'string' ? args.body : ''
+        const body = typeof args.content === 'string' ? args.content : (typeof args.body === 'string' ? args.body : '')
         if (!topic) return errorResult(op, `${op} requires topic`)
         if (!body.trim()) return errorResult(op, `${op} requires body`)
         const agent = str(args.agent) || defaultAgent(env)
@@ -333,7 +334,9 @@ export async function dispatch({ root = null, db = null, env = process.env, cwd 
       case 'inbox': {
         const agent = str(args.agent) || defaultAgent(env)
         return toToolResult(op, pages.inbox(agent, {
-          since: args.since == null || args.since === true ? null : clampInt(args.since, 0, 0, Number.MAX_SAFE_INTEGER),
+          since: args.sinceSeq == null
+            ? (args.since == null || args.since === true ? null : clampInt(args.since, 0, 0, Number.MAX_SAFE_INTEGER))
+            : clampInt(args.sinceSeq, 0, 0, Number.MAX_SAFE_INTEGER),
           topic: str(args.topic) || null,
           budget: budgetFor('inbox', args),
           advance: args.advance !== false,
