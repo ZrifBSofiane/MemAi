@@ -22,18 +22,6 @@
           }
         ]
       }
-    ],
-    "PreToolUse": [
-      {
-        "matcher": "Read",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "npx -y -p memai-cli memai hook guard",
-            "timeout": 15
-          }
-        ]
-      }
     ]
   }
 }

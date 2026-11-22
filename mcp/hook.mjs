@@ -21,7 +21,6 @@ import { estTokens } from '../src/tokens.mjs'
 import { MemoryStore } from '../src/store.mjs'
 import { MemoryPages } from '../src/page.mjs'
 import { watcherAlive } from '../src/watch.mjs'
-import { decideGuard, guardFilePath } from '../src/guard.mjs'
 
 export const HOOK_EVENTS = ['SessionStart', 'SubagentStart']
 
@@ -92,32 +91,6 @@ export async function hookIndexFile({ payload = null, root = null, db = null, en
     const pages = new MemoryPages({ store, root: projectRoot })
     const r = await pages.indexFiles([abs])
     return { ok: true, indexed: r.readFiles > 0 || r.deleted > 0, readFiles: r.readFiles, reused: r.reused, deleted: r.deleted, version: r.version }
-  } finally {
-    store.close()
-  }
-}
-
-/**
- * PreToolUse (`memai hook guard`): deny an above-threshold whole-file read and
- * return the signature page instead. `json` is null whenever the read may
- * proceed — the caller must stay silent in that case. Never throws.
- */
-export function hookGuardPayload({ payload = null, root = null, db = null, env = process.env, cwd = process.cwd(), now = Date.now() } = {}) {
-  const filePath = guardFilePath(payload)
-  if (!filePath) return { json: null, decision: 'allow', reason: 'no file path in payload' }
-  const abs = path.resolve(cwd, filePath)
-  const projectRoot = root ? path.resolve(root) : nearestProjectRoot(path.dirname(abs))
-  const dbPath = resolveDb(projectRoot, { db, env })
-  if (!fs.existsSync(dbPath)) return { json: null, decision: 'allow', reason: `no store at ${dbPath}` }
-  const store = new MemoryStore({ dbPath, root: projectRoot })
-  try {
-    const pages = new MemoryPages({ store, root: projectRoot })
-    const r = decideGuard({ payload, root: projectRoot, env, cwd, now, store, pages })
-    if (r.decision !== 'deny') return { json: null, decision: 'allow', reason: r.reason }
-    return {
-      json: { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: r.text } },
-      decision: 'deny', text: r.text, tokens: estTokens(r.text),
-    }
   } finally {
     store.close()
   }

@@ -65,15 +65,6 @@ limits are in [`bench/RESULTS.md`](bench/RESULTS.md).
   (2,607 / 4,127 tokens).
 - Counterfactual on real logs: **7.8×** fewer prompt tokens, **−56%** cost for
   a last-8-tool-results retention policy ([`docs/evidence.md`](docs/evidence.md)).
-- Read guard (`bench/guard-sim.mjs`, 14 tasks / 4 corpora): at the 8 KB default,
-  **7 files** are intercepted — **80%** of their read tokens — and the paged
-  alternative costs **13% of the read** (≈7.7× fewer tokens); worst file 3.4×,
-  max override penalty 446 tok. Set `minBytes: 4096` in `.memai/guard.json` to
-  intercept 90% of read tokens instead. **Live caveat**
-  ([`bench/GUARD-LIVE-ANALYSIS.md`](bench/GUARD-LIVE-ANALYSIS.md)): the simulation
-  assumes the agent faults; real headless sessions show it chunks into *partial*
-  reads instead, which costs more — in measured live use the guard is a policy
-  control, not a token saver.
 
 Every one of the 14 paged runs has **100% coverage** of the curated ground-truth
 file set; C\* includes the cost of paging every file the cheap plan missed. The
@@ -115,11 +106,6 @@ Across **six questions** spanning task types:
   included); graphify's rebuild no longer connects that pair even in
   undirected mode. `affected <target>` adds transitive blast radius in one
   page.
-- Read guard (0.5.0, no graphify equivalent): a denied 12,926-token whole-file
-  read is replaced by a **492-token** page with signatures and the three biggest
-  bodies to fault. Live caveat: models that already follow MemAi never trigger
-  it, and a model ordered to read the file chunks instead of faulting — see
-  [`bench/GUARD-LIVE-ANALYSIS.md`](bench/GUARD-LIVE-ANALYSIS.md).
 - Self-measured retrieval (`memai eval`, 12 shipped fixtures): recall@5
   **100%**, MRR 0.69 (index) / 0.70 (hybrid).
 - Where graphify genuinely wins: architecture-wide discovery (community
@@ -163,7 +149,6 @@ memai diff --last                   # resume delta without hunting for a hash
 memai pack handoff                  # budgeted bundle: card + notes + resume version
 memai eval                          # recall@k / MRR per mode from .memai/eval.json
 memai miss --stats                  # per-repo retrieval-miss counts
-memai guard status                  # PreToolUse read guard: config, deny count
 ```
 
 `pack` is the session-end move: one clamped page with the card, the board
@@ -369,14 +354,6 @@ MemAi is honest about where paging loses. All of these are measured, not guessed
 - **Node.js ≥ 22.13.** The store uses the built-in `node:sqlite` (still marked
   experimental by Node; its warning is filtered so stdout stays clean JSON).
   There are no native modules.
-- **The read guard is a reduction, not an enforcement boundary.** It intercepts
-  whole-file reads from `Read`-style tools; `cat` via a shell, `Grep` and partial reads
-  are not guarded. It stays out of the way for files below the threshold, unindexed
-  files and stale indexes, because paging those would cost more or serve wrong lines.
-  Measured live ([`bench/GUARD-LIVE-ANALYSIS.md`](bench/GUARD-LIVE-ANALYSIS.md)): an
-  agent denied a whole read switches to partial reads rather than faulting, so the
-  guard can **increase** session cost — treat it as a policy control, and keep it
-  off if you want tokens saved.
 - **No embeddings.** Structure first; semantic reranking is a possible future
   option for prose notes, not the core.
 

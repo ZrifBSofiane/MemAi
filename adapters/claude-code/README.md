@@ -88,25 +88,7 @@ Notes:
 - Hook-time output goes to stdout only; MemAi writes diagnostics to stderr.
 - Docs: https://code.claude.com/docs/en/hooks (SessionStart, `hookSpecificOutput.additionalContext`).
 
-## PreToolUse read guard
 
-`settings-hooks.json` also registers `memai hook guard` on `PreToolUse` (matcher `Read`). A
-whole-file `Read` of an indexed file above the guard threshold (default 8 KB, tunable in
-`.memai/guard.json`) is denied with the signature page and concrete `fault` suggestions:
-
-```json
-{ "hookSpecificOutput": { "hookEventName": "PreToolUse", "permissionDecision": "deny",
-  "permissionDecisionReason": "# MemAi guard — src/page.mjs withheld (22.5 KB ≈ 5,800 tok) …" } }
-```
-
-Repeat reads of the same path stay denied — the 0.5.1 live A/B showed models take an
-advertised repeat-read override and pay deny + full read. Escapes are config-level only:
-an `allow` glob in `.memai/guard.json`, or `MEMAI_GUARD=off`. Reads below the threshold,
-partial reads (`offset`/`limit`), unindexed files and stale indexes are always allowed — paging
-those would cost more or serve wrong line numbers. Verified: deny +
-`permissionDecisionReason` on Claude Code 2.1.140.
-
-## Skill
 
 The canonical skill is **not duplicated in this adapter**; the single source of truth is
 [`../../skills/memai/SKILL.md`](../../skills/memai/SKILL.md) (portable Agent Skills format).

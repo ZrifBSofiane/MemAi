@@ -33,7 +33,11 @@ captured.
 - B4 remains MemAi's: graphify's rebuild still does not connect
   `bin/memai.mjs` to `src/store.mjs` in either direction.
 
-## Read guard (new in 0.5.0 — no graphify equivalent)
+## Read guard (new in 0.5.0 — **removed in 0.6.0**, see below)
+
+> **Removed in 0.6.0.** Three live A/B runs showed the guard increases session
+> cost in every measured regime (agents override, or chunk into partial reads).
+> Record: [`GUARD-LIVE-ANALYSIS.md`](GUARD-LIVE-ANALYSIS.md).
 
 A PreToolUse hook denies whole-file reads only where paging halves the cost
 (`bytes ≥ 8 KB` and `file_tokens ≥ 2 × (sig + 400)`), returning signatures.

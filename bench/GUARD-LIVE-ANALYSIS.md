@@ -1,5 +1,8 @@
 # Live guard A/B — analysis (2026-11-22)
 
+> **The feature described here was removed in 0.6.0.** This page is kept as the
+> measurement record that justified the removal.
+
 The first *behavioural* measurement of the read guard: real headless sessions,
 billed tokens from the ZCode app DB, not a simulation. Result: **in the regime
 where the guard fires, the shipped override policy makes it cost more than no
@@ -98,9 +101,7 @@ needs the whole file, the guard converts one cheap read into several expensive o
 
 ## Reproduce
 
-```bash
-# one-time: install + trust the hook (ZCode UI grants trust; config alone is inert)
-# then:
-node tools/guard-ab.mjs          # 3 tasks × 2 arms, writes bench/guard-live-<date>.{json,md}
-node tools/zcode-session-report.mjs --session <sess_id>   # per-session detail
-```
+Not reproducible in-tree: the A/B runner and the session analyzer were removed
+with the feature in 0.6.0. The raw artifacts
+(`bench/guard-live-2026-11-22*.{json,md}`) and the ZCode app DB remain the
+evidence trail.

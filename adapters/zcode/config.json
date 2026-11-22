@@ -4,7 +4,12 @@
       "memai": {
         "type": "stdio",
         "command": "npx",
-        "args": ["-y", "-p", "memai-cli", "memai-mcp"],
+        "args": [
+          "-y",
+          "-p",
+          "memai-cli",
+          "memai-mcp"
+        ],
         "timeoutMs": 30000
       }
     }
@@ -19,13 +24,27 @@
             {
               "type": "process",
               "command": "npx",
-              "args": ["-y", "-p", "memai-cli", "memai", "hook", "card"],
+              "args": [
+                "-y",
+                "-p",
+                "memai-cli",
+                "memai",
+                "hook",
+                "card"
+              ],
               "timeoutMs": 20000
             },
             {
               "type": "process",
               "command": "npx",
-              "args": ["-y", "-p", "memai-cli", "memai", "watch", "--ensure"],
+              "args": [
+                "-y",
+                "-p",
+                "memai-cli",
+                "memai",
+                "watch",
+                "--ensure"
+              ],
               "timeoutMs": 10000
             }
           ]
@@ -38,20 +57,14 @@
             {
               "type": "process",
               "command": "npx",
-              "args": ["-y", "-p", "memai-cli", "memai", "hook", "index"],
-              "timeoutMs": 15000
-            }
-          ]
-        }
-      ],
-      "PreToolUse": [
-        {
-          "matcher": "Read|read_file",
-          "hooks": [
-            {
-              "type": "process",
-              "command": "npx",
-              "args": ["-y", "-p", "memai-cli", "memai", "hook", "guard"],
+              "args": [
+                "-y",
+                "-p",
+                "memai-cli",
+                "memai",
+                "hook",
+                "index"
+              ],
               "timeoutMs": 15000
             }
           ]

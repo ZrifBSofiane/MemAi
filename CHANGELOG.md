@@ -4,6 +4,25 @@ All notable changes to this project are documented here. The format is loosely
 based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the
 project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] — 2026-11-22
+
+### Removed
+
+- **The read guard (`memai hook guard`, `memai guard status`) and its PreToolUse
+  wiring in the adapter samples.** Three live A/B runs measured it on real
+  headless sessions: where the agent follows MemAi's instructions it never fires;
+  where a prompt orders a whole-file read it makes the session more expensive
+  (models take an advertised override, then chunk into partial reads when the
+  override is removed) — **+2% to +149% billed input**. It does not save tokens
+  in any measured regime, so it is removed rather than shipped. The measurement
+  record stays in `bench/GUARD-LIVE-ANALYSIS.md` (archival); the simulation and
+  the A/B tooling went with it.
+
+### Changed
+
+- No behavioural change on any default path: init, query/fault/get/diff/graph,
+  the MCP surface, the retrieval eval and the head-to-head numbers are untouched.
+
 ## [0.5.1] — 2026-11-22
 
 The first live behavioural measurement changed the guard's design.
