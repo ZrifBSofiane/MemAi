@@ -10,9 +10,8 @@ import path from 'node:path'
 import { MemoryStore } from './store.mjs'
 import { MemoryPages, DEFAULTS } from './page.mjs'
 import { estTokens } from './tokens.mjs'
-import { loadGuardConfig, readState } from './guard.mjs'
 
-export const VERSION = '0.5.1'
+export const VERSION = '0.6.0'
 
 const HELP = `MemAi CLI  (tokens are the currency; every response has a token count)
 
@@ -30,8 +29,6 @@ const HELP = `MemAi CLI  (tokens are the currency; every response has a token co
   graph --shortest <a> <b>   BFS shortest import path between two files/symbols
   affected <path|sym> [--budget 500]   blast radius: files that transitively
                              import it, with hop counts (cycle-safe)
-  guard status               PreToolUse guard: effective config, deny count,
-                             last denial (see adapters/ for hook wiring)
   pack [topic] [--fault "a,b"] [--no-card] [--budget 1500]  budgeted handoff
                              bundle: card + board notes + fault slices + resume version
   eval [--fixtures FILE] [--k 5] [--modes index,hybrid]  retrieval quality harness;
@@ -150,22 +147,6 @@ export async function run(argv, { env = null } = {}) {
         const target = positional.slice(1).join(' ')
         if (!target) return { ok: false, cmd, error: 'usage: affected <path|symbol>', tokens: 0 }
         return { ok: true, cmd, ...pages.affected(target, { budget: num(flags.budget, DEFAULTS.graph) }) }
-      }
-      case 'guard': {
-        const cfg = loadGuardConfig({ root, env: process.env })
-        const st = readState(root)
-        const lines = [
-          `# guard — ${cfg.enabled ? 'enabled' : 'disabled'} (min ${(cfg.minBytes / 1024).toFixed(1)} KB, tools: ${cfg.toolNames.join(', ')})`,
-          `denials: ${st.denyCount}${st.lastDeny ? `  last: ${st.lastDeny.rel} (${st.lastDeny.fileTokens} tok) at ${st.lastDeny.at}` : ''}`,
-        ]
-        if (cfg.allow.length) lines.push(`allow: ${cfg.allow.join(', ')}`)
-        const text = lines.join('\n')
-        return {
-          ok: true, cmd,
-          guard: { enabled: cfg.enabled, minBytes: cfg.minBytes, allow: cfg.allow, toolNames: cfg.toolNames, source: cfg.source },
-          denyCount: st.denyCount, lastDeny: st.lastDeny,
-          tokens: estTokens(text), text,
-        }
       }
       case 'pack': {
         const topic = positional[1] ?? 'handoff'

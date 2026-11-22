@@ -64,16 +64,9 @@ there is no card yet (silent no-op) and never creates/updates the store.
 | Agent | Hook event name | Handler shape | Status |
 | --- | --- | --- | --- |
 | Claude Code | `SessionStart`, `SubagentStart` | `{ "type": "command", "command": "<shell string>", "timeout": 30 }` | ✅ executed end-to-end |
-| ZCode | `SessionStart` | `{ "type": "process", "command": "...", "args": [...], "timeoutMs": 20000 }` (argv, **not** a shell string) | 📖 documented |
+| ZCode | `SessionStart` | `{ "type": "process", "command": "...", "args": [...], "timeoutMs": 20000 }` (argv, **not** a shell string) | 📖 documented; also needs a UI trust grant (a hand-added entry is silently `pending_trust`, verified 2026-11-22) |
 | OpenCode | — | no documented config-level hook; MCP `instructions` used instead | n/a |
 | Codex | — | no stable user-facing context-injection hook documented | n/a |
-
-Guard-specific (PreToolUse deny):
-
-| Agent | Contract | Status |
-| --- | --- | --- |
-| Claude Code | `permissionDecision: "deny"` + `permissionDecisionReason` under `hookSpecificOutput` | ✅ verified on 2.1.140 |
-| ZCode | same keys present in the installed runtime (`permissionDecision`, `permissionDecisionReason`, `"deny"`); `hooks.events.PreToolUse` accepts a process hook with a tool-name matcher | ✅ verified from the installed binary; **requires a UI trust grant** — an untrusted config entry is classified `workspace_hooks_pending_trust` and silently not run (measured 2026-11-22) |
 
 Note the argument names differ between Claude Code and ZCode (`command` shell string vs `process` +
 `args` argv). Do not copy one block to the other unchanged.

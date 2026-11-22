@@ -73,26 +73,15 @@ example output is exactly MemAi's shape:
 ```
 
 Empty stdout is a no-op, so `memai hook card` printing nothing before the store exists is safe.
+**Trust gate (verified 2026-11-22):** a hook entry added to `config.json` by hand does **not**
+run until ZCode marks it trusted — the runtime classifies it `workspace_hooks_pending_trust`
+with `effectiveRunnable: false` and skips it silently. Grant trust through the app's hooks
+review after adding any hook.
+
 Exit code `2` blocks; MemAi always exits 0. Source:
 https://github.com/hyudryu/ZCode/blob/main/apps/zcode-cli/README.md ("Hooks Configuration").
 
-## PreToolUse read guard
 
-Register `memai hook guard` on `PreToolUse` (matcher `Read|read_file`) to deny above-threshold
-whole-file reads with the signature page instead. Verified from the installed ZCode runtime:
-the hook contract includes `permissionDecision`, `permissionDecisionReason` and `"deny"`, and
-`PreToolUse` accepts a process hook with a tool-name matcher. Repeat reads stay denied
-(0.5.1 — the live A/B showed an advertised override is taken immediately); escapes are
-config-level only: an `allow` glob in `.memai/guard.json` or `MEMAI_GUARD=off`. `memai
-guard status` shows the effective config and deny count.
-
-**Trust gate (verified the hard way):** a hook entry added to `config.json` by hand does **not**
-run until ZCode marks it trusted — the runtime classifies it `workspace_hooks_pending_trust`
-with `effectiveRunnable: false` and skips it silently. Grant trust through the app's hooks
-review; until then the guard is inert. Check `memai guard status` (deny count stays 0 when the
-hook never ran) before concluding the guard is misconfigured.
-
-## Instructions
 
 ZCode resolves agent instructions from `AGENTS.md`: the workspace file (walking up to the project
 root) plus a user-level `~/.zcode/AGENTS.md`, capped at 100 KiB. Verified from the CLI source
