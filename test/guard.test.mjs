@@ -147,3 +147,46 @@ test('state file is tolerant of corruption and prunes expired entries', async ()
     assert.equal(hasOverride(root, { sessionId: 'a', rel: 'x.js', now: 3_700_000 }), false, 'expired override pruned')
   } finally { store.close() }
 })
+
+import { spawnSync } from 'node:child_process'
+import { SELF } from '../scripts/test-helpers.mjs'
+
+const runHook = (root, payload, env = {}) => spawnSync(process.execPath, [SELF.bin, 'hook', 'guard', '--root', root], {
+  cwd: root, encoding: 'utf8', timeout: 60_000,
+  input: typeof payload === 'string' ? payload : JSON.stringify(payload),
+  env: { ...process.env, ...env },
+})
+
+test('CLI: large read -> one deny JSON object, exit 0', async () => {
+  const { root, store } = await guardProject()
+  try {
+    const r = runHook(root, readPayload('big.js'))
+    assert.equal(r.status, 0, r.stderr)
+    const out = r.stdout.trim()
+    assert.equal(out.split('\n').length, 1, 'exactly one line of stdout')
+    const j = JSON.parse(out)
+    assert.equal(j.hookSpecificOutput.hookEventName, 'PreToolUse')
+    assert.equal(j.hookSpecificOutput.permissionDecision, 'deny')
+    assert.match(j.hookSpecificOutput.permissionDecisionReason, /MemAi guard/)
+  } finally { store.close() }
+})
+
+test('CLI: allow paths print nothing, malformed input still exits 0', async () => {
+  const { root, store } = await guardProject()
+  try {
+    assert.equal(runHook(root, readPayload('small.js')).stdout, '')
+    const bad = runHook(root, 'not json')
+    assert.equal(bad.stdout, '')
+    assert.equal(bad.status, 0)
+    assert.equal(runHook(root, readPayload('big.js'), { MEMAI_GUARD: 'off' }).stdout, '')
+  } finally { store.close() }
+})
+
+test('CLI: no store -> silent allow', () => {
+  const root = tempDir()
+  cleanup.push(root)
+  fs.writeFileSync(path.join(root, 'huge.js'), 'export const x = 1\n'.repeat(500))
+  const r = runHook(root, readPayload('huge.js'))
+  assert.equal(r.status, 0)
+  assert.equal(r.stdout, '')
+})
