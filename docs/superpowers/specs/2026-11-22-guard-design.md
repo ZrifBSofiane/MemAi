@@ -119,7 +119,8 @@ simulation (below) is the evidence for that default. Missing/invalid
 
 ## Deny payload (the teaching moment)
 
-The reason is a small page, ~400 tokens, shaped like every other MemAi page:
+The reason is a small page, ~500 tokens (400-token signature excerpt + header and
+moves), shaped like every other MemAi page:
 
 ```
 # MemAi guard — src/page.mjs withheld (18.2 KB ≈ 4,600 tok)
@@ -147,15 +148,25 @@ override sentence is always present.
 
 ## Measurement
 
-Extend `bench/bench.mjs` with a guard simulation over the existing 14-task
-ground truth: for each task, the guard-forced workflow (signatures + faults
-until 100% coverage of the curated file set) at thresholds 4/8/16 KB, compared
-with the current naive-read and C\* plans. The default `minBytes` is the
-smallest threshold at which the guard-forced total never exceeds C\* by more
-than 5% on any task.
+Add `bench/guard-sim.mjs` (reusing `bench/corpora.mjs`, kept out of the already-679-line
+`bench.mjs`): for every file referenced by the 14 benchmark tasks, compare a whole-file
+read against the guard-forced alternative (signature page at 400 tok + one fault
+estimate) at thresholds 4 / 8 / 16 KB, and report per threshold: files denied,
+intercepted share of naive-read tokens, forced/read savings ratio, and the worst
+override penalty.
 
-The live-harness A/B (same tasks, guard on vs off, real sessions) is documented
-as the follow-up the maintainer runs; it is not claimed by this design.
+The default `minBytes` is validated by three criteria, all mechanically checkable:
+
+- **(a) rule invariant** — every denied file satisfies `read ≥ 2 × forced`;
+- **(b) share** — intercepted read tokens ≥ 25% of the naive-read total across tasks;
+- **(c) override cost** — per-denial penalty (`sig + one tool call`) ≤ 500 tokens.
+
+8 KB ships unless (b) fails there; then 4 KB is tried, provided (c) still holds. The
+sim's output is committed next to the other benchmark records; if a criterion fails,
+the default changes before merge — the number follows the data.
+
+The live-harness A/B (same tasks, guard on vs off, real sessions) is documented as the
+follow-up the maintainer runs; it is not claimed by this design.
 
 ## Surfaces (all four, per the PR #7 lesson)
 
