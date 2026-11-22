@@ -1,6 +1,6 @@
 {
   "name": "memai-cli",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "description": "Paged memory for coding agents: a ~200-token project card plus a symbol manifest, demand-paged detail and Merkle deltas, shared by Claude Code, Codex, OpenCode, ZCode and DSH through one MCP server, one CLI, or one portable Agent Skills package.",
   "type": "module",
   "license": "MIT",
@@ -43,7 +43,9 @@
     "test": "node --test \"test/*.test.mjs\"",
     "selftest": "node bench/selftest.mjs",
     "bench": "node bench/bench.mjs",
-    "probe": "node scripts/mcp-probe.mjs"
+    "probe": "node scripts/mcp-probe.mjs",
+    "bench:cost": "node bench/cost.mjs",
+    "bench:ab": "node tools/cost-ab.mjs"
   },
   "keywords": [
     "ai-agent",

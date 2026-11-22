@@ -408,7 +408,13 @@ export class MemoryStore {
     return { recorded: true, versionHash }
   }
   getVersion(versionHash) {
-    const row = this.one('SELECT * FROM versions WHERE version_hash = ?', versionHash)
+    const h = String(versionHash ?? '').trim().toLowerCase()
+    if (!h) return null
+    let row = this.one('SELECT * FROM versions WHERE version_hash = ?', h)
+    if (!row && /^[0-9a-f]{6,40}$/.test(h)) {
+      const rows = this.all('SELECT * FROM versions WHERE version_hash LIKE ? ORDER BY created_at DESC LIMIT 2', `${h}%`)
+      if (rows.length === 1) row = rows[0]
+    }
     if (!row) return null
     return { ...row, manifest: JSON.parse(row.manifest) }
   }

@@ -4,7 +4,7 @@ description: Use MemAi's paged memory in a repository with a .memai store instea
 license: MIT
 compatibility: Requires a project with a MemAi store (`memai init`, Node >= 22.13) and either the `mem` MCP tool or the `memai` CLI on PATH. Local-only; no network. Works in Agent Skills clients including Claude Code, OpenCode, Codex, ZCode, DSH and generic SKILL.md hosts.
 metadata:
-  version: "0.4.0"
+  version: "0.8.0"
   docs: https://github.com/ZrifBSofiane/MemAi
   pager: .memai/mem.db
 ---
@@ -66,7 +66,7 @@ the alternative is reading whole files into context.
 4. **Resume.** With a version hash from the last session: `{"op":"diff","since":"<version>"}`
    (CLI `memai diff --since <version>`). Re-index locally after edits with `{"op":"index"}` or
    `memai index` (no model tokens).
-5. **Share.** `{"op":"note","topic":"handoff","body":"auth move: see file:src/auth.js"}`,
+5. **Share.** `{"op":"note","topic":"handoff","content":"auth move: see file:src/auth.js"}`,
    `{"op":"post",...}`, `{"op":"inbox","agent":"<id>"}`; CLI `memai note/post/inbox`.
 
 If MCP is unavailable, every step has a CLI equivalent. If the CLI is unavailable but MCP is

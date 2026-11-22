@@ -5,6 +5,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
 import { SELF, RpcClient, tempDir, makeCorpus, indexPath, textOf, assertProtocolClean } from '../scripts/test-helpers.mjs'
+import { dispatch, memTool } from '../mcp/tools.mjs'
 
 let root
 let db
@@ -298,4 +299,22 @@ test('tools/call mem graph target2 (shortest) and affected navigate the import g
     assert.match(textOf(affected), /src\/billing\.js/)
     assert.ok((affected.result.structuredContent?.tokens ?? 0) > 0)
   })
+})
+
+test('flat schema keeps query body boolean and note content string', () => {
+  const p = memTool().inputSchema.properties
+  assert.equal(p.body.type, 'boolean', 'query body must be a boolean')
+  assert.equal(p.content.type, 'string', 'note/post content must be a string')
+  assert.equal(p.since.type, 'string', 'diff since must be a string')
+  assert.equal(p.sinceSeq.type, 'integer', 'inbox sinceSeq must be an integer')
+})
+
+test('note accepts content and the legacy body string; inbox accepts sinceSeq', async () => {
+  const a = await dispatch({ root, db }, 'note', { topic: 'schema', content: 'hello' })
+  assert.equal(a.isError, false)
+  assert.match(a.content[0].text, /note/)
+  const b = await dispatch({ root, db }, 'note', { topic: 'schema', body: 'legacy' })
+  assert.equal(b.isError, false)
+  const c = await dispatch({ root, db }, 'inbox', { agent: 'schema-agent', sinceSeq: 0 })
+  assert.equal(c.isError, false)
 })

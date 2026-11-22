@@ -149,7 +149,7 @@ export function instructionBlock({ agents = [] } = {}) {
     '  fault only the symbols the task touches.',
     '- resume after edits: `{"op":"diff","since":"<version>"}` (record the current version at session end) —',
     '  do not re-read changed files. Re-index after edits: `{"op":"index"}` (local, 0 model tokens).',
-    '- share state with other agents: `{"op":"note","topic":"<topic>","body":"..."}` and',
+    '- share state with other agents: `{"op":"note","topic":"<topic>","content":"..."}` and',
     '  `{"op":"inbox","agent":"<id>"}`. Send page ids and symbol names, never file bodies.',
     '- dependency or blast-radius questions: `{"op":"graph","target":"<path|symbol>"}` (importers, imports,',
     '  chains), `{"op":"affected","target":"<path|symbol>"}` (transitive importers with hop counts), and',

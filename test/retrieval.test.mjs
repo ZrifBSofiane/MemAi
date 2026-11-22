@@ -33,8 +33,10 @@ test('query --rg finds body-only content the index never pages', async () => {
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
   try {
     // "amount must be positive" appears only inside createInvoice's body — file pages carry signatures, not bodies.
+    // A zero-hit index query now auto-runs the rg pass; the explicit flag remains available.
     const bare = pages.query('amount must be positive', { k: 5 })
-    assert.equal(bare.hits.length, 0, 'index-only query must miss body text')
+    assert.ok(bare.hits.length >= 1, 'zero-hit index query auto-runs rg')
+    assert.match(bare.rgNote ?? '', /auto-rg/)
 
     // Fresh files can be briefly unreadable to rg (AV scans) → partial results;
     // retry briefly until the body line shows up instead of flaking.
@@ -436,6 +438,39 @@ test('query --body prefers a callable body over a higher-ranked const', async ()
     const r = pages.query('debounce watcher', { body: true })
     assert.equal(r.body.ok, true)
     assert.equal(r.body.symbol, 'startWatcher', `expected the function, got ${r.body.symbol}`)
+    assert.match(r.body.text, /pidfile/)
+  } finally { store.close() }
+})
+
+test('query --body prefers the matching source callable over docs headings', async () => {
+  const dir = tempDir()
+  cleanup.push(dir)
+  const root = path.join(dir, 'project')
+  fs.mkdirSync(path.join(root, 'src'), { recursive: true })
+  fs.writeFileSync(path.join(root, 'package.json'), '{"name":"body-docs","version":"1.0.0","type":"module"}')
+  const docs = ['# How does the watcher debounce work?', '']
+  for (let i = 0; i < 25; i++) docs.push(`## Watcher debounce work ${i}`, '')
+  docs.push('This page explains the watcher debounce design.', '')
+  fs.writeFileSync(path.join(root, 'README.md'), docs.join('\n'))
+  fs.writeFileSync(path.join(root, 'src', 'watch.js'), [
+    'export const DEBOUNCE_MS = 800',
+    'export function startWatcher() {',
+    '  const pidfile = ".memai/watch.pid"',
+    '  return pidfile',
+    '}',
+    'export function watcherAlive() {',
+    '  return true',
+    '}',
+    '',
+  ].join('\n'))
+  const store = new MemoryStore({ dbPath: path.join(root, '.memai', 'mem.db'), root })
+  store.setMeta('root', root)
+  const pages = new MemoryPages({ store, root })
+  await pages.index({ maxFiles: 100 })
+  try {
+    const r = pages.query('how does the watcher debounce work', { body: true })
+    assert.equal(r.body.ok, true)
+    assert.equal(r.body.symbol, 'startWatcher', `expected startWatcher, got ${r.body.symbol}`)
     assert.match(r.body.text, /pidfile/)
   } finally { store.close() }
 })

@@ -20,7 +20,7 @@ import crypto from 'node:crypto'
 import { execFileSync } from 'node:child_process'
 import { sha1 } from './store.mjs'
 import { estTokens, clampText } from './tokens.mjs'
-import { EXTRACTOR_VERSION, KEYWORDS, langOf, isTestPath } from './extract.mjs'
+import { EXTRACTOR_VERSION, KEYWORDS, langOf, isTestPath, isDocPath } from './extract.mjs'
 
 export const DEFAULTS = {
   card: 700, map: 3500, get: 1200, fault: 600, query: 400, diff: 600, graph: 500, pack: 1500,
@@ -188,7 +188,21 @@ export class MemoryPages {
     }
   }
 
-  card(opts = {}) { return this.resolve('project.card', { budget: opts.budget ?? DEFAULTS.card, ...opts }) }
+  card(opts = {}) {
+    const budget = opts.budget ?? DEFAULTS.card
+    const r = this.resolve('project.card', { budget, ...opts })
+    if (!r.ok) return r
+    if (/^version: [0-9a-f]{8}$/m.test(r.text)) return r
+    const latest = this.store.latestVersion()
+    const v = latest?.version_hash?.slice(0, 8)
+    if (!v) return r
+    // The version line is a convenience, not part of the page: never let it
+    // push a deliberately tiny card over its budget.
+    const text = `${r.text}\nversion: ${v}`
+    const tokens = estTokens(text)
+    if (tokens > budget) return r
+    return { ...r, text, tokens }
+  }
   map(opts = {}) { return this.resolve('project.map', { budget: opts.budget ?? DEFAULTS.map, ...opts }) }
   get(pageId, opts = {}) {
     // Batch: `get file:a,file:b` returns several pages in one model turn.
@@ -548,9 +562,13 @@ export class MemoryPages {
       }
     }
     let rgNote = null
-    if (rg) {
+    // A body-only string (error text, literal) is invisible to the signature
+    // index. When the index finds nothing, run the existing ripgrep pass
+    // automatically instead of spending a second model call on `query --rg`.
+    const autoRg = !rg && hits.length === 0
+    if (rg || autoRg) {
       const extra = this._rgSearch(q, { cap: 5 })
-      rgNote = extra.note
+      rgNote = autoRg ? `auto-rg: ${extra.note ?? 'no index hits'}` : extra.note
       const seenLines = new Set(hits.filter((h) => h.line).map((h) => `${h.path}:${h.line}`))
       for (const h of extra.hits) {
         const key = `${h.path}:${h.line}`
@@ -587,13 +605,43 @@ export class MemoryPages {
     if (body) {
       // Prefer a callable body, searched over the symbol pool (not just the
       // displayed hits): the top hit is often a const, and the function that
-      // answers "how does X work" can rank below the visible page.
-      const cands = this.store.symbolSearch(q, { limit: 20 })
-      const chosen = cands.find((s) => ['function', 'method', 'class'].includes(s.kind)) ?? cands[0]
+      // answers "how does X work" can rank below the visible page. Docs and
+      // tests are fallbacks: a README heading must not win over source code.
+      const terms = String(q).toLowerCase().split(/[^a-z0-9_$]+/i).filter((t) => t.length >= 2)
+      const all = this.store.symbolSearch(q, { limit: 40 })
+      const callables = all.filter((s) => ['function', 'method', 'class'].includes(s.kind))
+      // A natural-language question can rank 40 docs symbols ahead of the
+      // source function that answers it. Add the callables of the top source
+      // pages so the right file's functions are in the pool even when their
+      // names do not match the query terms.
+      for (const p of this.store.searchPages(q, { limit: 40 })) {
+        if (!p.pageId.startsWith('file:') || !p.path || isTestPath(p.path) || isDocPath(p.path)) continue
+        for (const s of this.store.symbolsForPage(p.pageId)) {
+          if (!['function', 'method', 'class'].includes(s.kind)) continue
+          if (callables.some((c) => c.path === p.path && c.name === s.name)) continue
+          callables.push({ ...s, path: p.path })
+        }
+        if (callables.length > 120) break
+      }
+      const source = callables.filter((s) => !isTestPath(s.path) && !isDocPath(s.path))
+      const preferred = new Set(top.filter((h) => h.kind === 'page' && h.path).map((h) => h.path))
+      const score = (s) => {
+        const name = String(s.name).toLowerCase()
+        const sig = String(s.signature ?? '').toLowerCase()
+        let n = preferred.has(s.path) ? 5 : 0
+        for (const t of terms) {
+          if (name.includes(t)) n += 3
+          else if (sig.includes(t)) n += 1
+        }
+        return n
+      }
+      const pool = (source.length ? source : callables.length ? callables : all).slice()
+        .sort((a, b) => score(b) - score(a) || a.path.localeCompare(b.path) || a.line - b.line)
+      const chosen = pool[0]
       if (!chosen) {
         bodySection = { ok: false, error: 'no symbol hit; use get file:<path> for signatures' }
       } else {
-        const f = this.fault(chosen.name, { budget: DEFAULTS.fault })
+        const f = this.fault(`${chosen.path}#${chosen.name}`, { budget: DEFAULTS.fault })
         bodySection = f.ok
           ? { ok: true, target: chosen.name, symbol: chosen.name, path: f.path ?? chosen.path, tokens: f.tokens, text: f.text }
           : { ok: false, target: chosen.name, error: f.error }

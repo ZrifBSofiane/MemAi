@@ -4,6 +4,36 @@ All notable changes to this project are documented here. The format is loosely
 based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the
 project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.0] — 2026-11-22
+
+### Fixed
+
+- **MCP schema collisions.** `query` keeps `body: boolean`; `note`/`post` use
+  `content: string`; `inbox` uses `sinceSeq: integer`. Dispatch accepts the
+  legacy names. `query --body` is discoverable through the MCP schema again.
+- **`query --body` selection.** Source callables are scored on name/signature
+  term overlap plus a top-source-page bonus; docs and tests are fallbacks.
+  "How does the watcher debounce work" now selects `startWatcher` (was
+  `workspace`, a README heading).
+- **Version prefixes.** `store.getVersion` resolves an unambiguous hash prefix;
+  `status`/`card` print prefixes that `diff --since` now accepts.
+
+### Added
+
+- **Card version.** The card ends with `version: <hash>`; a resume can go
+  straight to `diff --since` without a `status` call.
+- **Auto-rg.** A zero-hit `query` runs the ripgrep pass automatically instead of
+  asking the agent for a second call.
+
+### Measured
+
+- Live same-corpus A/B: **−66.5 %** billed input across three tasks, with the
+  resume task using **8 fewer local CLI calls (−80 %)**. The body-selection and
+  auto-rg tasks answered correctly at one call where 0.7.0 answered wrong.
+  See `bench/BENCHMARK-0.8.0-turns.md`.
+- The payload lever (`--text` + renderer trims) was measured and discarded; the
+  negative result is in `bench/NEGATIVE-payload.md`.
+
 ## [0.7.0] — 2026-11-22
 
 Round-trip reduction: fewer model turns per question — the cost that dominates
