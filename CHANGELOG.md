@@ -22,10 +22,14 @@ Interception: the guardrail changes what the model does, not just what it can do
 
 ### Eval
 
-- `node bench/guard-sim.mjs`, 14 tasks / 4 corpora: at the **8 KB default**, 6 files
-  are intercepted (65% of their read tokens) and the paged alternative costs 12% of
-  the read (≈8× fewer tokens); worst file 3.4×; max override penalty 446 tok. At
-  4 KB the share is 84% — users who want it aggressive set `minBytes: 4096`.
+- Head-to-head re-run against graphify 0.9.34 (`bench/BENCHMARK-0.5.0.md`):
+  **1,472 vs 4,213 tokens** across the six questions (~2.9×), every MemAi answer
+  complete where graphify misses B2/B4/B5; the guard's real deny page is 492 tok
+  for a 12,926-token read (26×).
+- `node bench/guard-sim.mjs`, 14 tasks / 4 corpora: at the **8 KB default**, 7 files
+  are intercepted (80% of their read tokens) and the paged alternative costs 13% of
+  the read (≈7.7× fewer tokens); worst file 3.4×; max override penalty 446 tok. At
+  4 KB the share is 90% — users who want it aggressive set `minBytes: 4096`.
 
 ## [0.4.0] — 2026-11-17
 

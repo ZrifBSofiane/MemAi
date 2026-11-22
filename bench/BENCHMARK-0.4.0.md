@@ -73,6 +73,10 @@ whole queries as one substring. Both fixed in 0.4.0, TDD'd in
 | --- | --- |
 | `checkpoint` + one-line edits to 3 core files + `index` + `diff --last` | **176** (0.3.0 measured 286 on a different 3-file edit set) |
 
+> **Correction (see [`BENCHMARK-0.5.0.md`](BENCHMARK-0.5.0.md)):** this "176"
+> was the first `changed[].tokens` entry — a changed file's size — not the
+> delta page. The delta page for the same shape of edit is 75 tokens.
+
 ## Reproduce
 
 ```bash

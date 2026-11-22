@@ -66,10 +66,10 @@ limits are in [`bench/RESULTS.md`](bench/RESULTS.md).
 - Counterfactual on real logs: **7.8×** fewer prompt tokens, **−56%** cost for
   a last-8-tool-results retention policy ([`docs/evidence.md`](docs/evidence.md)).
 - Read guard (`bench/guard-sim.mjs`, 14 tasks / 4 corpora): at the 8 KB default,
-  **6 files** are intercepted — **65%** of their read tokens — and the paged
-  alternative costs **12% of the read** (≈8× fewer tokens); worst file 3.4×,
+  **7 files** are intercepted — **80%** of their read tokens — and the paged
+  alternative costs **13% of the read** (≈7.7× fewer tokens); worst file 3.4×,
   max override penalty 446 tok. Set `minBytes: 4096` in `.memai/guard.json` to
-  intercept 84% of read tokens instead.
+  intercept 90% of read tokens instead.
 
 Every one of the 14 paged runs has **100% coverage** of the curated ground-truth
 file set; C\* includes the cost of paging every file the cheap plan missed. The
@@ -88,9 +88,10 @@ reads are already cheap) to 5.50× (a locate task on the real 288-file corpus).
 graphify (v0.9.34) builds a knowledge graph over a corpus (AST for code, LLM
 extraction for docs) with community detection and budgeted graph queries. It is
 the closest tool in spirit, so we compared them on the **same copy of this
-repository** (81 files, 14.3K LOC), same machine, same day. Full method,
+repository** (87 files), same machine, same day. Full method,
 per-question numbers and honest losses in
-[`bench/BENCHMARK-0.4.0.md`](bench/BENCHMARK-0.4.0.md) (earlier records:
+[`bench/BENCHMARK-0.5.0.md`](bench/BENCHMARK-0.5.0.md) (earlier records:
+[`bench/BENCHMARK-0.4.0.md`](bench/BENCHMARK-0.4.0.md),
 [`bench/BENCHMARK-0.3.0.md`](bench/BENCHMARK-0.3.0.md),
 [`bench/GRAPHIFY.md`](bench/GRAPHIFY.md)).
 
@@ -99,8 +100,8 @@ Across **six questions** spanning task types:
 | | MemAi | graphify 0.9.34 |
 | --- | --- | --- |
 | Per-session instruction overhead | **986 tok** (one MCP tool schema) | 10,351 tok (`skill.md`, loaded per invocation) |
-| Zero-token build coverage | **all 81 files** (code + docs + config) | code files only — docs/papers/images need its LLM extraction (real tokens) |
-| Totals across 6 questions | **1,461 tok — every answer complete** | 4,173 tok — 3 outright misses, 2 truncated, bodies still need file reads |
+| Zero-token build coverage | **all 87 files** (code + docs + config) | code files only — docs/papers/images need its LLM extraction (real tokens) |
+| Totals across 6 questions | **1,472 tok — every answer complete** | 4,213 tok — 3 outright misses, 2 truncated, bodies still need file reads |
 
 - **~2.9× fewer tokens across the six questions** (~10.5× less per-session
   instruction overhead), with the answer being the code itself rather than an
@@ -110,8 +111,11 @@ Across **six questions** spanning task types:
   included); graphify's rebuild no longer connects that pair even in
   undirected mode. `affected <target>` adds transitive blast radius in one
   page.
+- Read guard (0.5.0, no graphify equivalent): a 12,926-token whole-file read of
+  `src/page.mjs` is replaced by a **492-token deny page** — 26× fewer tokens,
+  with signatures and the three biggest bodies to fault.
 - Self-measured retrieval (`memai eval`, 12 shipped fixtures): recall@5
-  **100%**, MRR 0.68 (index) / 0.69 (hybrid).
+  **100%**, MRR 0.69 (index) / 0.70 (hybrid).
 - Where graphify genuinely wins: architecture-wide discovery (community
   detection, god nodes), mixed corpora (papers, images, video), cross-repo
   merged graphs, and human-facing HTML/GraphRAG exports. MemAi does none of
@@ -391,7 +395,8 @@ PROTOCOL.md   normative page/version/delta/tool contract for implementers
 - [Design & cost model](docs/design.md)
 - [Evidence: where the tokens go](docs/evidence.md)
 - [Benchmark results](bench/RESULTS.md)
-- [Head-to-head vs graphify](bench/BENCHMARK-0.4.0.md) ·
+- [Head-to-head vs graphify](bench/BENCHMARK-0.5.0.md) ·
+  [archive: 0.4.0](bench/BENCHMARK-0.4.0.md) ·
   [archive: 0.3.0](bench/BENCHMARK-0.3.0.md) ·
   [archive: 0.2.1](bench/GRAPHIFY.md)
 - [FAQ](docs/faq.md)
