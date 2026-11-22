@@ -44,15 +44,34 @@ test('gate fails when an arm is missing', () => {
 
 test('renderTable includes both arms and the correctness column', () => {
   const t = renderTable([
-    { id: 'P1', arm: 'baseline', billedInput: 1, turns: 2, toolCalls: 3, bashTextCalls: 0, correct: true },
-    { id: 'P1', arm: 'treatment', billedInput: 2, turns: 2, toolCalls: 3, bashTextCalls: 2, correct: true },
+    { id: 'P1', arm: 'baseline', billedInput: 1, turns: 2, cliCalls: 3, correct: true },
+    { id: 'P1', arm: 'treatment', billedInput: 2, turns: 2, cliCalls: 3, correct: true },
   ])
   assert.match(t, /baseline/)
   assert.match(t, /treatment/)
-  assert.match(t, /--text calls/)
+  assert.match(t, /local CLI/)
 })
 
 test('payload task set has stable ids and expectations', () => {
   assert.deepEqual(TASK_SETS.payload.map((t) => t.id), ['P1', 'P2', 'P3'])
   for (const t of TASK_SETS.payload) assert.ok(t.expect instanceof RegExp)
+})
+
+test('turns tasks require fewer local CLI calls', () => {
+  assert.deepEqual(TASK_SETS.turns.map((t) => t.id), ['T1', 'T2', 'T3'])
+  for (const t of TASK_SETS.turns) {
+    assert.equal(t.requireCli, true)
+    assert.equal(t.requireFewerCalls, true)
+    assert.match(t.prompt, /node bin\/memai\.mjs/)
+  }
+})
+
+test('gate fails when the treatment does not use fewer local CLI calls', () => {
+  const rows = [
+    { id: 'T1', arm: 'baseline', billedInput: 1000, correct: true, valid: true, cliCalls: 2 },
+    { id: 'T1', arm: 'treatment', billedInput: 900, correct: true, valid: true, cliCalls: 2, requireFewerCalls: true },
+  ]
+  const v = gate(rows)
+  assert.equal(v.ok, false)
+  assert.match(v.failures.join(' '), /fewer local CLI calls/)
 })

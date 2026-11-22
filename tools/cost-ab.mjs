@@ -35,6 +35,29 @@ export const TASK_SETS = {
       prompt: 'Use the memai CLI via Bash (not MCP) to list the MemAi MCP operations. Answer with the operation names.',
     },
   ],
+  turns: [
+    {
+      id: 'T1',
+      requireCli: true,
+      requireFewerCalls: true,
+      expect: /flushDelayMs|startWatcher/,
+      prompt: 'Use exactly one local CLI call: `node bin/memai.mjs query "how does the watcher debounce work" --body --text`. Answer with the function that computes the delay. Do not use the MCP tool, a globally installed `memai`, or any other lookup.',
+    },
+    {
+      id: 'T2',
+      requireCli: true,
+      requireFewerCalls: true,
+      expect: /src\/|no changes|up to date/i,
+      prompt: 'Call `node bin/memai.mjs card --text` once. If the card carries a `version:` line, call `node bin/memai.mjs diff --since <that version> --text` once and list the changed files. If it does not, call `node bin/memai.mjs status --text` once to get the version, then the same diff. Answer with the changed files.',
+    },
+    {
+      id: 'T3',
+      requireCli: true,
+      requireFewerCalls: true,
+      expect: /watch\.mjs/,
+      prompt: 'Use exactly one local CLI call: `node bin/memai.mjs query "unref" --text`. Answer with the file path that contains that token. Do not use the MCP tool, a globally installed `memai`, or grep.',
+    },
+  ],
 }
 
 export function gate(rows) {
@@ -59,6 +82,11 @@ export function gate(rows) {
       failures.push(`${id}: treatment ${t.treatment.billedInput} > baseline ${t.baseline.billedInput}`)
     }
     if (t.treatment.correct === false) failures.push(`${id}: incorrect answer`)
+    if (t.baseline.valid === false) failures.push(`${id}: baseline did not run the local CLI`)
+    if (t.treatment.valid === false) failures.push(`${id}: treatment did not run the local CLI`)
+    if (t.treatment.requireFewerCalls && !(Number.isFinite(t.baseline.cliCalls) && t.treatment.cliCalls < t.baseline.cliCalls)) {
+      failures.push(`${id}: treatment did not use fewer local CLI calls (${t.treatment.cliCalls} vs ${t.baseline.cliCalls})`)
+    }
   }
   if (treatTotal >= baseTotal) failures.push(`total ${treatTotal} >= baseline ${baseTotal}`)
   return { ok: failures.length === 0, failures, baseTotal, treatTotal }
@@ -66,11 +94,11 @@ export function gate(rows) {
 
 export function renderTable(rows) {
   const lines = [
-    '| task | arm | billed-in | turns | tool calls | --text calls | correct |',
-    '| --- | --- | ---: | ---: | ---: | ---: | --- |',
+    '| task | arm | billed-in | turns | local CLI | correct |',
+    '| --- | --- | ---: | ---: | ---: | --- |',
   ]
   for (const r of rows) {
-    lines.push(`| ${r.id} | ${r.arm} | ${r.billedInput ?? '-'} | ${r.turns ?? '-'} | ${r.toolCalls ?? '-'} | ${r.bashTextCalls ?? '-'} | ${r.correct === null ? '-' : r.correct ? 'yes' : 'no'} |`)
+    lines.push(`| ${r.id} | ${r.arm} | ${r.billedInput ?? '-'} | ${r.turns ?? '-'} | ${r.cliCalls ?? '-'} | ${r.correct === null ? '-' : r.correct ? 'yes' : 'no'} |`)
   }
   return lines.join('\n')
 }
@@ -86,7 +114,8 @@ function runOne({ dir, task, arm }) {
   if (!rep.ok) return { id: task.id, arm, dir, ok: false, error: rep.error, session: session.id }
   const events = rep.toolEvents ?? []
   const commandOf = (e) => typeof e.input?.command === 'string' ? e.input.command : ''
-  const bashTextCalls = events.filter((e) => e.tool === 'Bash' && commandOf(e).includes('--text')).length
+  const localCli = (cmd) => /bin[\\/]memai\.mjs/.test(cmd)
+  const cliCalls = events.filter((e) => e.tool === 'Bash' && localCli(commandOf(e))).length
   const memCalls = events.filter((e) => /mem/i.test(e.tool)).length
     + events.filter((e) => e.tool === 'Bash' && /memai\s/.test(commandOf(e))).length
   return {
@@ -94,7 +123,9 @@ function runOne({ dir, task, arm }) {
     billedInput: rep.billedInput, turns: rep.turns,
     toolCalls: events.length,
     toolErrors: events.filter((e) => e.status === 'error').length,
-    bashTextCalls, memCalls,
+    cliCalls, memCalls,
+    valid: task.requireCli ? cliCalls > 0 : true,
+    requireFewerCalls: !!task.requireFewerCalls,
     correct: task.expect ? task.expect.test(res.stdout ?? '') : null,
     stdoutTail: (res.stdout ?? '').slice(-400),
   }
@@ -116,32 +147,34 @@ function main() {
   }
   const baseline = flag(argv, 'baseline')
   const treatment = flag(argv, 'treatment')
+  const baselineDir = baseline ? path.resolve(baseline) : null
+  const treatmentDir = treatment ? path.resolve(treatment) : null
   if (argv.includes('--dry-run')) {
     process.stdout.write(`# dry run [${setName}] — ${tasks.length} tasks × 2 arms = ${tasks.length * 2} sessions\n`)
-    process.stdout.write(`baseline:  ${baseline ?? '(missing --baseline)'}\n`)
-    process.stdout.write(`treatment: ${treatment ?? '(missing --treatment)'}\n`)
+    process.stdout.write(`baseline:  ${baselineDir ?? '(missing --baseline)'}\n`)
+    process.stdout.write(`treatment: ${treatmentDir ?? '(missing --treatment)'}\n`)
     for (const t of tasks) process.stdout.write(`${t.id}: ${t.prompt.slice(0, 80)}…\n`)
     return
   }
-  if (!baseline || !treatment) {
+  if (!baselineDir || !treatmentDir) {
     process.stderr.write('usage: node tools/cost-ab.mjs --baseline <dir> --treatment <dir> [--tasks payload] [--label name]\n')
     process.exitCode = 2
     return
   }
   const rows = []
-  for (const [arm, dir] of [['baseline', baseline], ['treatment', treatment]]) {
+  for (const [arm, dir] of [['baseline', baselineDir], ['treatment', treatmentDir]]) {
     for (const task of tasks) {
       let r = runOne({ dir, task, arm })
       if (r.billedInput === 0) r = runOne({ dir, task, arm })
       rows.push(r)
-      process.stderr.write(`${arm} ${task.id}: billedIn=${r.billedInput ?? '-'} textCalls=${r.bashTextCalls ?? '-'}\n`)
+      process.stderr.write(`${arm} ${task.id}: billedIn=${r.billedInput ?? '-'} cli=${r.cliCalls ?? '-'}\n`)
     }
   }
   const verdict = gate(rows)
   const label = flag(argv, 'label') ?? setName
   const stamp = new Date().toISOString().slice(0, 10)
   const md = `# live cost A/B [${label}] — ${stamp}\n\n${renderTable(rows)}\n\n${verdict.ok ? 'PASS' : 'FAIL'}: ${verdict.failures.length ? verdict.failures.join('; ') : `total ${verdict.treatTotal} < ${verdict.baseTotal}`}\n`
-  fs.writeFileSync(path.join(OUT, `cost-ab-${stamp}-${label}.json`), JSON.stringify({ date: stamp, set: setName, dirs: { baseline, treatment }, verdict, rows }, null, 2) + '\n')
+  fs.writeFileSync(path.join(OUT, `cost-ab-${stamp}-${label}.json`), JSON.stringify({ date: stamp, set: setName, dirs: { baseline: baselineDir, treatment: treatmentDir }, verdict, rows }, null, 2) + '\n')
   fs.writeFileSync(path.join(OUT, `cost-ab-${stamp}-${label}.md`), md)
   process.stdout.write(md)
   process.exitCode = verdict.ok ? 0 : 1
