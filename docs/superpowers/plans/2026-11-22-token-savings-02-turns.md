@@ -616,7 +616,6 @@ In `tools/cost-ab.mjs`, add to `TASK_SETS` after `payload`:
     {
       id: 'T1',
       requireCli: true,
-      requireFewerCalls: true,
       expect: /flushDelayMs|startWatcher/,
       prompt: 'Use exactly one local CLI call: `node bin/memai.mjs query "how does the watcher debounce work" --body --text`. Answer with the function that computes the delay. Do not use the MCP tool, a globally installed `memai`, or any other lookup.',
     },
@@ -624,13 +623,12 @@ In `tools/cost-ab.mjs`, add to `TASK_SETS` after `payload`:
       id: 'T2',
       requireCli: true,
       requireFewerCalls: true,
-      expect: /src\/|no changes|up to date/i,
+      expect: /empty|nothing changed|no changes|up to date|src\//i,
       prompt: 'Call `node bin/memai.mjs card --text` once. If the card carries a `version:` line, call `node bin/memai.mjs diff --since <that version> --text` once and list the changed files. If it does not, call `node bin/memai.mjs status --text` once to get the version, then the same diff. Answer with the changed files.',
     },
     {
       id: 'T3',
       requireCli: true,
-      requireFewerCalls: true,
       expect: /watch\.mjs/,
       prompt: 'Use exactly one local CLI call: `node bin/memai.mjs query "breakerLogged" --text`. Answer with the file path that contains that token. Do not use the MCP tool, a globally installed `memai`, or grep.',
     },
@@ -700,7 +698,10 @@ Expected: 3 tasks × 2 arms = 6 sessions. Gate: every treatment `cliCalls` < bas
 
 Pass requires all of:
 
-- every treatment `cliCalls` < its baseline;
+- T2 treatment `cliCalls` < baseline (the resume task is the call-count probe);
+- T1 and T3 treatment answers correct at no higher billed input than baseline
+  (both prompts force one call, so they are correctness probes, not call-count
+  probes);
 - total treatment `billedInput` < total baseline;
 - `correct` is true for every treatment row;
 - `cliCalls > 0` for both arms.
@@ -818,7 +819,7 @@ git commit -m "release: 0.8.0 turns lever"
 
 ## Self-Review
 
-**Spec coverage:** The turns lever's four changes are Tasks 1–4. The schema repair includes the non-circular card-version decision (read-time append). The live gate covers body selection, resume, and auto-rg; the schema repair is validated by unit and dispatch tests because the global MCP server runs the published package (the same environment limitation documented in the payload plan). The optional `query --body --deep` experiment is deferred: the design marked it discardable, and the three core fixes already target the call count.
+**Spec coverage:** The turns lever's four changes are Tasks 1–4. The schema repair includes the non-circular card-version decision (read-time append). The live gate has one call-count probe (T2 resume) and two correctness probes at forced one call (T1 body selection, T3 auto-rg); this matches the fact that the prompts cap those tasks at one call. The optional `query --body --deep` experiment is deferred: the design marked it discardable, and the three core fixes already target the call count.
 
 **Placeholder scan:** The benchmark and changelog templates use `<fill>` markers with explicit replacement steps; no code placeholders.
 

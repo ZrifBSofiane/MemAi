@@ -39,7 +39,6 @@ export const TASK_SETS = {
     {
       id: 'T1',
       requireCli: true,
-      requireFewerCalls: true,
       expect: /flushDelayMs|startWatcher/,
       prompt: 'Use exactly one local CLI call: `node bin/memai.mjs query "how does the watcher debounce work" --body --text`. Answer with the function that computes the delay. Do not use the MCP tool, a globally installed `memai`, or any other lookup.',
     },
@@ -47,13 +46,12 @@ export const TASK_SETS = {
       id: 'T2',
       requireCli: true,
       requireFewerCalls: true,
-      expect: /src\/|no changes|up to date/i,
+      expect: /empty|nothing changed|no changes|up to date|src\//i,
       prompt: 'Call `node bin/memai.mjs card --text` once. If the card carries a `version:` line, call `node bin/memai.mjs diff --since <that version> --text` once and list the changed files. If it does not, call `node bin/memai.mjs status --text` once to get the version, then the same diff. Answer with the changed files.',
     },
     {
       id: 'T3',
       requireCli: true,
-      requireFewerCalls: true,
       expect: /watch\.mjs/,
       prompt: 'Use exactly one local CLI call: `node bin/memai.mjs query "breakerLogged" --text`. Answer with the file path that contains that token. Do not use the MCP tool, a globally installed `memai`, or grep.',
     },

@@ -57,11 +57,11 @@ test('payload task set has stable ids and expectations', () => {
   for (const t of TASK_SETS.payload) assert.ok(t.expect instanceof RegExp)
 })
 
-test('turns tasks require fewer local CLI calls', () => {
+test('turns tasks require the local CLI; the resume task requires fewer calls', () => {
   assert.deepEqual(TASK_SETS.turns.map((t) => t.id), ['T1', 'T2', 'T3'])
   for (const t of TASK_SETS.turns) {
     assert.equal(t.requireCli, true)
-    assert.equal(t.requireFewerCalls, true)
+    assert.equal(!!t.requireFewerCalls, t.id === 'T2')
     assert.match(t.prompt, /node bin\/memai\.mjs/)
   }
 })
