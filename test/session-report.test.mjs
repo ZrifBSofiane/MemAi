@@ -100,3 +100,14 @@ test('deny detection reads metadata.modelContent when output is empty', () => {
   assert.equal(r.ok, true)
   assert.equal(r.denyCount, 2, 'p5 output form + p6 modelContent form')
 })
+
+test('toolEvents exposes per-call inputs for A/B attribution', () => {
+  const dbPath = fixtureDb()
+  const r = sessionReport({ dbPath, sessionId: 'sess_a' })
+  assert.ok(Array.isArray(r.toolEvents), 'toolEvents is an array')
+  assert.equal(r.toolEvents.filter((e) => e.tool === 'Read').length, 3)
+  const fault = r.toolEvents.find((e) => e.tool === 'fault')
+  assert.equal(fault.input.target, 'query')
+  assert.equal(fault.status, 'completed')
+  assert.ok(fault.outputBytes > 0)
+})

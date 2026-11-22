@@ -62,16 +62,19 @@ export function sessionReport({ dbPath = DEFAULT_DB, sessionId } = {}) {
     const reads = []
     const denied = []
     const calls = new Map()
+    const toolEvents = []
     for (const row of parts) {
       let d
       try { d = JSON.parse(row.data) } catch { continue }
       if (d?.type !== 'tool' || !d.tool) continue
       const st = d.state ?? {}
       const entry = calls.get(d.tool) ?? { tool: d.tool, count: 0, errors: 0, outputBytes: 0 }
+      const outputBytes = typeof st.output === 'string' ? st.output.length : 0
       entry.count += 1
       if (st.status === 'error') entry.errors += 1
-      entry.outputBytes += typeof st.output === 'string' ? st.output.length : 0
+      entry.outputBytes += outputBytes
       calls.set(d.tool, entry)
+      toolEvents.push({ tool: d.tool, input: st.input ?? {}, status: st.status ?? null, outputBytes })
       if (d.tool !== 'Read') continue
       const input = st.input ?? {}
       const out = typeof st.output === 'string' ? st.output : ''
@@ -98,6 +101,7 @@ export function sessionReport({ dbPath = DEFAULT_DB, sessionId } = {}) {
       tokens: { input: t.input, output: t.output, reasoning: t.reasoning, cacheRead: t.cacheRead, cacheWrite: t.cacheWrite },
       billedInput: t.input + t.cacheRead + t.cacheWrite,
       toolCalls: [...calls.values()].sort((a, b) => b.count - a.count),
+      toolEvents,
       reads,
       wholeFileReads: reads.filter((r) => r.wholeFile && !r.denied).length,
       denyCount: denied.length,
