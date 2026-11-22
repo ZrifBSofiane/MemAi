@@ -75,3 +75,15 @@ test('gate fails when the treatment does not use fewer local CLI calls', () => {
   assert.equal(v.ok, false)
   assert.match(v.failures.join(' '), /fewer local CLI calls/)
 })
+
+test('gate allows a small cost tolerance on a correctness probe', () => {
+  const rows = [
+    { id: 'T1', arm: 'baseline', billedInput: 100000, correct: false, valid: true, cliCalls: 1 },
+    { id: 'T1', arm: 'treatment', billedInput: 100500, correct: true, valid: true, cliCalls: 1, tolerancePct: 1 },
+    { id: 'T2', arm: 'baseline', billedInput: 100000, correct: true, valid: true, cliCalls: 5 },
+    { id: 'T2', arm: 'treatment', billedInput: 90000, correct: true, valid: true, cliCalls: 2, requireFewerCalls: true },
+  ]
+  assert.equal(gate(rows).ok, true)
+  rows[1].billedInput = 103000
+  assert.equal(gate(rows).ok, false)
+})

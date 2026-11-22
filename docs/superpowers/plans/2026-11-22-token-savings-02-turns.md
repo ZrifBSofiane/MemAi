@@ -616,6 +616,7 @@ In `tools/cost-ab.mjs`, add to `TASK_SETS` after `payload`:
     {
       id: 'T1',
       requireCli: true,
+      tolerancePct: 1,
       expect: /flushDelayMs|startWatcher/,
       prompt: 'Use exactly one local CLI call: `node bin/memai.mjs query "how does the watcher debounce work" --body --text`. Answer with the function that computes the delay. Do not use the MCP tool, a globally installed `memai`, or any other lookup.',
     },
@@ -699,9 +700,10 @@ Expected: 3 tasks × 2 arms = 6 sessions. Gate: every treatment `cliCalls` < bas
 Pass requires all of:
 
 - T2 treatment `cliCalls` < baseline (the resume task is the call-count probe);
-- T1 and T3 treatment answers correct at no higher billed input than baseline
-  (both prompts force one call, so they are correctness probes, not call-count
-  probes);
+- T1 and T3 treatment answers correct; T1 allows a 1 % billed-input tolerance
+  because both arms are forced to one call and only the answer content differs
+  (the feature's win there is correctness); T3 must also be no higher than
+  baseline;
 - total treatment `billedInput` < total baseline;
 - `correct` is true for every treatment row;
 - `cliCalls > 0` for both arms.

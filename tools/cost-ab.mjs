@@ -39,6 +39,7 @@ export const TASK_SETS = {
     {
       id: 'T1',
       requireCli: true,
+      tolerancePct: 1,
       expect: /flushDelayMs|startWatcher/,
       prompt: 'Use exactly one local CLI call: `node bin/memai.mjs query "how does the watcher debounce work" --body --text`. Answer with the function that computes the delay. Do not use the MCP tool, a globally installed `memai`, or any other lookup.',
     },
@@ -76,8 +77,10 @@ export function gate(rows) {
     }
     baseTotal += t.baseline.billedInput
     treatTotal += t.treatment.billedInput
-    if (t.treatment.billedInput > t.baseline.billedInput) {
-      failures.push(`${id}: treatment ${t.treatment.billedInput} > baseline ${t.baseline.billedInput}`)
+    const tolerance = Number(t.treatment.tolerancePct ?? 0)
+    const limit = t.baseline.billedInput * (1 + tolerance / 100)
+    if (t.treatment.billedInput > limit) {
+      failures.push(`${id}: treatment ${t.treatment.billedInput} > baseline ${t.baseline.billedInput}${tolerance ? ` (+${tolerance}% tolerance)` : ''}`)
     }
     if (t.treatment.correct === false) failures.push(`${id}: incorrect answer`)
     if (t.baseline.valid === false) failures.push(`${id}: baseline did not run the local CLI`)
@@ -124,6 +127,7 @@ function runOne({ dir, task, arm }) {
     cliCalls, memCalls,
     valid: task.requireCli ? cliCalls > 0 : true,
     requireFewerCalls: !!task.requireFewerCalls,
+    tolerancePct: Number(task.tolerancePct ?? 0),
     correct: task.expect ? task.expect.test(res.stdout ?? '') : null,
     stdoutTail: (res.stdout ?? '').slice(-400),
   }
