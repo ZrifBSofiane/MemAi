@@ -20,7 +20,7 @@ import { runInit } from '../src/init.mjs'
 import { runSkillCommand } from '../src/skill.mjs'
 import { runWatch } from '../src/watch.mjs'
 import { startServer } from '../mcp/server.mjs'
-import { hookCardPayload, hookIndexFile } from '../mcp/hook.mjs'
+import { hookCardPayload, hookIndexFile, hookGuardPayload } from '../mcp/hook.mjs'
 import { PRODUCT, VERSION, resolveRoot, resolveDb } from '../mcp/paths.mjs'
 
 // The CLI reports the published package version (package.json is always shipped); the MCP
@@ -42,6 +42,8 @@ Usage:
   memai hook card [--event E]     Print Claude Code SessionStart hook JSON with the
                                   project card as additionalContext (--text for raw text).
   memai hook index                PostToolUse: index the file an editing tool just wrote
+  memai hook guard                PreToolUse: deny above-threshold whole-file
+                             reads, returning signatures (silent = allow)
                                   (Claude-style JSON payload on stdin; silent; never fails).
   memai watch [--ensure|--stop|--status] [--debounce-ms N]
                                   Resident daemon: keep the store fresh by watching the tree.
@@ -162,8 +164,27 @@ async function main() {
       }
       return 0
     }
+    if (sub === 'guard') {
+      // PreToolUse: deny an above-threshold whole-file read. Anything unexpected
+      // (bad payload, store error) degrades to silence = allow. Exit 0 always.
+      try {
+        const raw = await readStdin(5000)
+        let payload = null
+        try { payload = raw.trim() ? JSON.parse(raw) : null } catch { payload = null }
+        const r = hookGuardPayload({
+          payload,
+          root: parsed.flags.root === true ? null : parsed.flags.root,
+          db: parsed.flags.db === true ? null : parsed.flags.db,
+        })
+        if (r.json) process.stdout.write(JSON.stringify(r.json) + '\n')
+        else if (process.env.MEMAI_DEBUG) process.stderr.write(`[memai hook guard] allow: ${r.reason}\n`)
+      } catch (err) {
+        if (process.env.MEMAI_DEBUG) process.stderr.write(`[memai hook guard] ${err?.message ?? err}\n`)
+      }
+      return 0
+    }
     if (sub !== 'card' && sub !== 'session-start') {
-      process.stderr.write('usage: memai hook card [--event SessionStart|SubagentStart] [--text] [--root DIR] | memai hook index\n')
+      process.stderr.write('usage: memai hook card [--event SessionStart|SubagentStart] [--text] [--root DIR] | memai hook index | memai hook guard\n')
       return 2
     }
     const event = sub === 'session-start' ? 'SessionStart'

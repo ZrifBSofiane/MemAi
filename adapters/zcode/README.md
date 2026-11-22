@@ -76,6 +76,14 @@ Empty stdout is a no-op, so `memai hook card` printing nothing before the store 
 Exit code `2` blocks; MemAi always exits 0. Source:
 https://github.com/hyudryu/ZCode/blob/main/apps/zcode-cli/README.md ("Hooks Configuration").
 
+## PreToolUse read guard
+
+Register `memai hook guard` on `PreToolUse` (matcher `Read|read_file`) to deny above-threshold
+whole-file reads with the signature page instead. Verified from the installed ZCode runtime:
+the hook contract includes `permissionDecision`, `permissionDecisionReason` and `"deny"`, and
+`PreToolUse` accepts a process hook with a tool-name matcher. A second read of the same path
+overrides for the session; `memai guard status` shows the effective config and deny count.
+
 ## Instructions
 
 ZCode resolves agent instructions from `AGENTS.md`: the workspace file (walking up to the project
