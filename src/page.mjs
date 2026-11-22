@@ -188,7 +188,16 @@ export class MemoryPages {
     }
   }
 
-  card(opts = {}) { return this.resolve('project.card', { budget: opts.budget ?? DEFAULTS.card, ...opts }) }
+  card(opts = {}) {
+    const r = this.resolve('project.card', { budget: opts.budget ?? DEFAULTS.card, ...opts })
+    if (!r.ok) return r
+    if (/^version: [0-9a-f]{8}$/m.test(r.text)) return r
+    const latest = this.store.latestVersion()
+    const v = latest?.version_hash?.slice(0, 8)
+    if (!v) return r
+    const text = `${r.text}\nversion: ${v}`
+    return { ...r, text, tokens: estTokens(text) }
+  }
   map(opts = {}) { return this.resolve('project.map', { budget: opts.budget ?? DEFAULTS.map, ...opts }) }
   get(pageId, opts = {}) {
     // Batch: `get file:a,file:b` returns several pages in one model turn.
