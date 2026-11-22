@@ -228,3 +228,16 @@ test('instruction surfaces mention the guard', async () => {
   const readme = fs.readFileSync(path.join(REPO, 'README.md'), 'utf8')
   assert.match(readme, /memai hook guard|read guard/i)
 })
+
+test('guardSim: at 8 KB every denied file satisfies the 2x rule (self-host)', async () => {
+  const { guardSim } = await import('../bench/guard-sim.mjs')
+  const r = await guardSim({ specIds: ['memai'], thresholds: [8192] })
+  const t = r.byThreshold[8192]
+  assert.ok(t.denied >= 3, `expected several denied files in src/, got ${t.denied}`)
+  for (const row of t.rows) {
+    assert.ok(row.readTokens >= 2 * row.forcedTokens,
+      `${row.path}: read ${row.readTokens} vs forced ${row.forcedTokens}`)
+  }
+  assert.ok(t.interceptedShare > 0 && t.interceptedShare <= 1)
+  assert.ok(t.overridePenalty <= 500, `override penalty ${t.overridePenalty}`)
+})

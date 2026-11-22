@@ -20,6 +20,13 @@ Interception: the guardrail changes what the model does, not just what it can do
   (`config.json`), both verified against the harness contract.
 - **`bench/guard-sim.mjs`** — threshold simulation over the benchmark corpora.
 
+### Eval
+
+- `node bench/guard-sim.mjs`, 14 tasks / 4 corpora: at the **8 KB default**, 6 files
+  are intercepted (65% of their read tokens) and the paged alternative costs 12% of
+  the read (≈8× fewer tokens); worst file 3.4×; max override penalty 446 tok. At
+  4 KB the share is 84% — users who want it aggressive set `minBytes: 4096`.
+
 ## [0.4.0] — 2026-11-17
 
 The retrieval sprint: 50% → 100% recall@5 on the shipped fixtures — because

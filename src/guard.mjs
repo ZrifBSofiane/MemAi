@@ -122,8 +122,14 @@ const kb = (n) => (n / 1024).toFixed(1)
 
 /** The deny reason: size + cost, the signature page, and exactly what to do next. */
 export function buildDenyReason({ rel, bytes, fileTokens, sigText, sigTokens, minBytes, store }) {
-  const syms = (store?.symbolsForPage?.(`file:${rel}`) ?? [])
-    .filter((s) => !['heading', 'test', 'import', 'key'].includes(s.kind))
+  const all = (store?.symbolsForPage?.(`file:${rel}`) ?? []).filter((s) => !['heading', 'test', 'import', 'key'].includes(s.kind))
+  // Prefer bodies over constants; among bodies, suggest the largest — the line
+  // gap to the next symbol is a cheap size proxy (`fault noop` is a wasted move).
+  const callable = all.filter((s) => ['function', 'method', 'class'].includes(s.kind))
+  const pool = callable.length ? callable : all
+  const syms = pool
+    .map((s, i) => ({ ...s, gap: i + 1 < pool.length ? pool[i + 1].line - s.line : 0 }))
+    .sort((a, b) => b.gap - a.gap || a.line - b.line)
     .slice(0, 3)
   const lines = [
     `# MemAi guard — ${rel} withheld (${kb(bytes)} KB ≈ ${fileTokens} tok)`,

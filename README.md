@@ -65,6 +65,11 @@ limits are in [`bench/RESULTS.md`](bench/RESULTS.md).
   (2,607 / 4,127 tokens).
 - Counterfactual on real logs: **7.8×** fewer prompt tokens, **−56%** cost for
   a last-8-tool-results retention policy ([`docs/evidence.md`](docs/evidence.md)).
+- Read guard (`bench/guard-sim.mjs`, 14 tasks / 4 corpora): at the 8 KB default,
+  **6 files** are intercepted — **65%** of their read tokens — and the paged
+  alternative costs **12% of the read** (≈8× fewer tokens); worst file 3.4×,
+  max override penalty 446 tok. Set `minBytes: 4096` in `.memai/guard.json` to
+  intercept 84% of read tokens instead.
 
 Every one of the 14 paged runs has **100% coverage** of the curated ground-truth
 file set; C\* includes the cost of paging every file the cheap plan missed. The
