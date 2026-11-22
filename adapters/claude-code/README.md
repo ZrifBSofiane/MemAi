@@ -99,8 +99,9 @@ whole-file `Read` of an indexed file above the guard threshold (default 8 KB, tu
   "permissionDecisionReason": "# MemAi guard — src/page.mjs withheld (22.5 KB ≈ 5,800 tok) …" } }
 ```
 
-`Read` on the same path again overrides for the session (1 h TTL); `MEMAI_GUARD=off` disables
-it; `memai guard status` prints the effective config and deny count. Reads below the threshold,
+Repeat reads of the same path stay denied — the 0.5.1 live A/B showed models take an
+advertised repeat-read override and pay deny + full read. Escapes are config-level only:
+an `allow` glob in `.memai/guard.json`, or `MEMAI_GUARD=off`. Reads below the threshold,
 partial reads (`offset`/`limit`), unindexed files and stale indexes are always allowed — paging
 those would cost more or serve wrong line numbers. Verified: deny +
 `permissionDecisionReason` on Claude Code 2.1.140.

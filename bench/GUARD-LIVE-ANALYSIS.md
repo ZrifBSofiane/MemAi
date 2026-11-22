@@ -5,7 +5,7 @@ billed tokens from the ZCode app DB, not a simulation. Result: **in the regime
 where the guard fires, the shipped override policy makes it cost more than no
 guard at all** — a negative result worth publishing.
 
-Raw run-2 artifact: [`guard-live-2026-11-22.md`](guard-live-2026-11-22.md).
+Raw artifacts: [`guard-live-2026-11-22.md`](guard-live-2026-11-22.md) (run 2) and [`guard-live-2026-11-22-command.md`](guard-live-2026-11-22-command.md) (run 3).
 
 ## Setup
 
@@ -61,22 +61,40 @@ above the threshold. Billed input varied 201K–652K across runs because the
 exploration path differed; with zero interception events that variance says
 nothing about the guard, so this run is context, not a comparison.
 
-## What this means
+## Run 3 — command prompts, tightened guard (0.5.1: no override)
+
+The 0.5.0 override and its advertisement were removed (`CHANGELOG` 0.5.1) and the
+same command prompts were re-run.
+
+| task | file | baseline billed-in | treatment billed-in | delta | treatment trace |
+| --- | --- | --- | --- | --- | --- |
+| C1 | src/page.mjs | 132,949 | 330,707 | **+148.7%** | 1 deny, then `Read×4` |
+| C2 | src/store.mjs | 203,071 | 207,812 | +2.3% | 1 deny, `Bash×2` + `Read×1` |
+| C3 | src/extract.mjs | 129,920 | 210,352 | **+61.9%** | 1 deny, then `Read×4` |
+
+Zero whole-file reads completed in treatment — and **zero faults**. The model does
+not retry the denied read; it switches to *partial* reads (`offset`/`limit`, always
+allowed) and assembles the file across several calls. Chunking re-sends the context
+per step, so the session costs more, not less. C2's smaller delta is the same
+mechanism with fewer chunks.
+
+So the deny does change behaviour — just not toward paging. When the task genuinely
+needs the whole file, the guard converts one cheap read into several expensive ones.
+
+## What this means (updated)
 
 1. **Where instructions already work, the guard is inert** — no benefit, only
-   the per-read hook spawn. That is consistent with the design premise ("for
-   models that ignore instructions"), but it means the guard's value cannot be
-   shown in a repo where the MemAi instruction surfaces are present.
-2. **Where the guard does fire, the advertised override defeats it.** The deny
-   page says "Read this path again to override for this session"; the model
-   takes that offer immediately and the session pays deny + full read. Measured
-   cost: **+62–65% billed input** versus no guard.
-3. The next iteration is therefore a *design* change, not another prompt trick:
-   remove the override invitation from the deny page and stop granting the
-   override on a repeat read by default (explicit allowlist / env only), then
-   re-measure the command-prompt regime. If models then fault instead of
-   retrying, the guard works; if they loop on denied reads, the guard should
-   stay opt-in and this document says why.
+   the per-read hook spawn. Measured: zero whole-file reads and zero denies in
+   both arms when the agent has MemAi's MCP tools and instruction block.
+2. **Where the guard does fire, it makes the session more expensive.** 0.5.0's
+   advertised override was taken immediately (+62–65%). 0.5.1 removed it; the
+   model then chunked into partial reads (+2% to +149%), still never faulting.
+3. **Therefore the guard does not save tokens in any measured regime.** It is a
+   *policy* control (enforce "no whole-file reads") at a token cost, not a
+   savings feature. The honest product options are: keep it **opt-in/off by
+   default**, or retire it. The simulation's savings (80% of read tokens at 13%
+   cost) assume the agent faults instead of chunking — a behaviour this model
+   does not exhibit.
 
 ## Reproduce
 

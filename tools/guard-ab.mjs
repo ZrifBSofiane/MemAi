@@ -20,15 +20,23 @@ const ZCODE = 'C:/Program Files/ZCode/resources/glm/zcode.cjs'
 const GUARD_JSON = path.join(ROOT, '.memai', 'guard.json')
 const OUT_DIR = path.join(ROOT, 'bench')
 
-// Question-style prompts on purpose: a task lets the model choose how to
-// gather information, which is what the guard is meant to change. An explicit
-// "read it in full" order tests obedience, not behaviour (measured: models
-// take the advertised override and pay deny + full read).
-export const TASKS = [
-  { id: 'T1', file: 'src/page.mjs', prompt: 'In D:/Projects/MemAI/src/page.mjs, which function has the largest body by line span? Answer with its name and start/end line numbers.' },
-  { id: 'T2', file: 'src/store.mjs', prompt: 'How does symbolSearch in D:/Projects/MemAI/src/store.mjs rank results? Give the scoring terms and how idf is computed.' },
-  { id: 'T3', file: 'src/extract.mjs', prompt: 'Which symbol kinds does D:/Projects/MemAI/src/extract.mjs emit for markdown files, and what regex does it use?' },
-]
+// Two prompt sets:
+// - command: explicitly orders a whole-file read — the regime where the guard
+//   fires. An explicit order tests whether the deny page steers the model to a
+//   fault when there is no advertised bypass.
+// - question: a task that lets the model choose how to gather information.
+export const TASK_SETS = {
+  command: [
+    { id: 'C1', file: 'src/page.mjs', prompt: 'Read D:/Projects/MemAI/src/page.mjs in full, then list its five largest functions with line numbers. Do not modify files.' },
+    { id: 'C2', file: 'src/store.mjs', prompt: 'Read D:/Projects/MemAI/src/store.mjs in full, then summarize how symbolSearch ranks results. Do not modify files.' },
+    { id: 'C3', file: 'src/extract.mjs', prompt: 'Read D:/Projects/MemAI/src/extract.mjs in full, then summarize how symbols are extracted. Do not modify files.' },
+  ],
+  question: [
+    { id: 'Q1', file: 'src/page.mjs', prompt: 'In D:/Projects/MemAI/src/page.mjs, which function has the largest body by line span? Answer with its name and start/end line numbers.' },
+    { id: 'Q2', file: 'src/store.mjs', prompt: 'How does symbolSearch in D:/Projects/MemAI/src/store.mjs rank results? Give the scoring terms and how idf is computed.' },
+    { id: 'Q3', file: 'src/extract.mjs', prompt: 'Which symbol kinds does D:/Projects/MemAI/src/extract.mjs emit for markdown files, and what regex does it use?' },
+  ],
+}
 
 const setGuard = (enabled) => fs.writeFileSync(GUARD_JSON, JSON.stringify({ enabled, note: 'guard-ab arm control' }) + '\n')
 
@@ -64,9 +72,14 @@ export function renderTable(rows) {
 }
 
 function main() {
-  const dry = process.argv.includes('--dry-run')
+  const argv = process.argv.slice(2)
+  const setFlag = argv.indexOf('--task-set')
+  const setName = setFlag >= 0 && argv[setFlag + 1] ? argv[setFlag + 1] : 'command'
+  const TASKS = TASK_SETS[setName]
+  if (!TASKS) { process.stderr.write(`unknown --task-set ${setName} (use ${Object.keys(TASK_SETS).join('|')})\n`); process.exitCode = 2; return }
+  const dry = argv.includes('--dry-run')
   if (dry) {
-    process.stdout.write(`# dry run — ${TASKS.length} tasks × 2 arms = ${TASKS.length * 2} headless sessions\n`)
+    process.stdout.write(`# dry run [${setName}] — ${TASKS.length} tasks × 2 arms = ${TASKS.length * 2} headless sessions\n`)
     for (const t of TASKS) process.stdout.write(`${t.id} ${t.file}: ${t.prompt.slice(0, 80)}…\n`)
     return
   }
@@ -87,8 +100,8 @@ function main() {
   fs.rmSync(GUARD_JSON, { force: true }) // leave the project at defaults
   const table = renderTable(rows)
   const stamp = new Date().toISOString().slice(0, 10)
-  fs.writeFileSync(path.join(OUT_DIR, `guard-live-${stamp}.json`), JSON.stringify({ date: stamp, root: ROOT, rows }, null, 2) + '\n')
-  fs.writeFileSync(path.join(OUT_DIR, `guard-live-${stamp}.md`), `# live guard A/B — ${stamp}\n\n${table}\n`)
+  fs.writeFileSync(path.join(OUT_DIR, `guard-live-${stamp}-${setName}.json`), JSON.stringify({ date: stamp, taskSet: setName, root: ROOT, rows }, null, 2) + '\n')
+  fs.writeFileSync(path.join(OUT_DIR, `guard-live-${stamp}-${setName}.md`), `# live guard A/B [${setName}] — ${stamp}\n\n${table}\n`)
   process.stdout.write(table + '\n')
 }
 

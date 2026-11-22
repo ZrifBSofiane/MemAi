@@ -69,7 +69,7 @@ test('constants are the documented values', () => {
 
 import { MemoryStore } from '../src/store.mjs'
 import { MemoryPages } from '../src/page.mjs'
-import { decideGuard, readState, statePath, hasOverride, recordDeny } from '../src/guard.mjs'
+import { decideGuard, readState, statePath, recordDeny } from '../src/guard.mjs'
 
 /** Indexed project with one large (~10 KB) and one small file. */
 async function guardProject() {
@@ -94,7 +94,6 @@ test('decideGuard denies a large fresh indexed whole-file read', async () => {
     assert.equal(r.decision, 'deny')
     assert.equal(r.rel, 'big.js')
     assert.ok(r.text.includes('MemAi guard'))
-    assert.ok(r.text.includes('again'), 'override hint present')
     assert.ok(r.text.includes('fault '), 'concrete next moves present')
     const st = readState(root)
     assert.equal(st.denyCount, 1)
@@ -123,28 +122,35 @@ test('decideGuard allows: small, partial, not-indexed, outside, disabled, allowl
   } finally { store.close() }
 })
 
-test('override: second read in the same session passes, another session does not', async () => {
+test('repeat read is denied again — the live A/B showed the old override backfired', async () => {
   const { root, store, pages } = await guardProject()
-  const call = (session, now = 5_000) => decideGuard({ payload: readPayload('big.js', { session_id: session }), root, env: {}, cwd: root, now, store, pages })
+  const call = (session, env = {}) => decideGuard({ payload: readPayload('big.js', { session_id: session }), root, env, cwd: root, now: 5_000, store, pages })
   try {
     assert.equal(call('s1').decision, 'deny')
-    assert.equal(call('s1').decision, 'allow')
-    assert.equal(call('s1').reason, 'override')
-    assert.equal(call('s2').decision, 'deny')
-    // TTL expiry re-denies (now + 1h + 1ms).
-    assert.equal(call('s1', 5_000 + 3_600_001).decision, 'deny')
+    assert.equal(call('s1').decision, 'deny', 'a second read must not silently pass')
+    assert.equal(call('s1').decision, 'deny', 'and neither must a third')
+    // The deny page must not advertise a bypass the model will take.
+    const r = call('s1')
+    assert.ok(!/override/i.test(r.text), `deny text advertises an override: ${r.text.slice(0, 120)}`)
+    // Config-level escapes remain.
+    fs.writeFileSync(path.join(root, '.memai', 'guard.json'), JSON.stringify({ allow: ['big.*'] }))
+    assert.equal(call('s1').reason, 'allowlisted')
+    fs.rmSync(path.join(root, '.memai', 'guard.json'))
+    assert.equal(call('s1', { MEMAI_GUARD: 'off' }).reason, 'guard disabled')
   } finally { store.close() }
 })
 
-test('state file is tolerant of corruption and prunes expired entries', async () => {
+test('state file is tolerant of corruption and keeps deny stats only', async () => {
   const { root, store } = await guardProject()
   try {
     fs.writeFileSync(statePath(root), '{broken')
-    assert.deepEqual(readState(root), { version: 1, overrides: {}, denyCount: 0, lastDeny: null })
+    assert.deepEqual(readState(root), { version: 1, denyCount: 0, lastDeny: null })
     recordDeny(root, { sessionId: 'a', rel: 'x.js', now: 1, bytes: 1, fileTokens: 1, sigTokens: 1 })
-    assert.equal(hasOverride(root, { sessionId: 'a', rel: 'x.js', now: 2 }), true)
-    recordDeny(root, { sessionId: 'b', rel: 'y.js', now: 3_700_000, bytes: 1, fileTokens: 1, sigTokens: 1 })
-    assert.equal(hasOverride(root, { sessionId: 'a', rel: 'x.js', now: 3_700_000 }), false, 'expired override pruned')
+    recordDeny(root, { sessionId: 'b', rel: 'y.js', now: 2, bytes: 2, fileTokens: 2, sigTokens: 1 })
+    const st = readState(root)
+    assert.equal(st.denyCount, 2)
+    assert.equal(st.lastDeny.rel, 'y.js')
+    assert.equal(st.overrides, undefined, 'no override bookkeeping remains')
   } finally { store.close() }
 })
 

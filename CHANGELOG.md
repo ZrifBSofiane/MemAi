@@ -4,6 +4,27 @@ All notable changes to this project are documented here. The format is loosely
 based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the
 project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.1] — 2026-11-22
+
+The first live behavioural measurement changed the guard's design.
+
+### Fixed
+
+- **Repeat reads no longer override the guard.** The 0.5.0 deny page said "Read
+  this path again to override for this session" and granted a 1 h session pass.
+  Headless A/B on real sessions (`bench/GUARD-LIVE-ANALYSIS.md`) showed the model
+  takes that offer immediately: deny page + full 50 KB read, **+62–65% billed
+  input** versus no guard. The override and its advertisement are removed;
+  escapes are config-level only (`guard.json` `allow`, or `MEMAI_GUARD=off`).
+  `guard-state.json` now stores deny stats only.
+
+### Eval
+
+- Live A/B, ZCode 0.17.1 headless, deepseek-flash: where the agent already has
+  MemAi's instructions/MCP it pages and the guard never fires (whole-file reads 0
+  in both arms); where a prompt orders a whole-file read, 0.5.0's override made
+  the guard cost more. 0.5.1 is the re-measured variant.
+
 ## [0.5.0] — 2026-11-22
 
 Interception: the guardrail changes what the model does, not just what it can do.

@@ -12,7 +12,7 @@ import { MemoryPages, DEFAULTS } from './page.mjs'
 import { estTokens } from './tokens.mjs'
 import { loadGuardConfig, readState } from './guard.mjs'
 
-export const VERSION = '0.5.0'
+export const VERSION = '0.5.1'
 
 const HELP = `MemAi CLI  (tokens are the currency; every response has a token count)
 
