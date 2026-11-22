@@ -8,6 +8,7 @@
 // alternative; never throw into the caller (a hook must not break a session).
 import fs from 'node:fs'
 import path from 'node:path'
+import { sha1 } from './store.mjs'
 
 export const GUARD_DEFAULTS = Object.freeze({
   enabled: true,
@@ -72,4 +73,107 @@ export function isWholeFileRead(toolInput = {}) {
     if (v !== undefined && v !== null && v !== '') return false
   }
   return true
+}
+
+// ---------------------------------------------------------------- state ---
+
+export function statePath(root) { return path.join(root, '.memai', 'guard-state.json') }
+
+/** Deny/override state. Corrupt or missing file reads as empty. */
+export function readState(root) {
+  try {
+    const raw = JSON.parse(fs.readFileSync(statePath(root), 'utf8'))
+    const overrides = raw?.overrides && typeof raw.overrides === 'object' ? raw.overrides : {}
+    return { version: 1, overrides, denyCount: Number(raw?.denyCount) || 0, lastDeny: raw?.lastDeny ?? null }
+  } catch {
+    return { version: 1, overrides: {}, denyCount: 0, lastDeny: null }
+  }
+}
+
+/** Atomic write (tmp + rename); callers already swallow failures. */
+export function writeState(root, state) {
+  const p = statePath(root)
+  fs.mkdirSync(path.dirname(p), { recursive: true })
+  const tmp = `${p}.${process.pid}.tmp`
+  fs.writeFileSync(tmp, JSON.stringify(state))
+  fs.renameSync(tmp, p)
+}
+
+export function hasOverride(root, { sessionId, rel, now = Date.now(), ttlMs = STATE_TTL_MS }) {
+  const ts = readState(root).overrides[`${sessionId}|${rel}`]
+  return typeof ts === 'number' && now - ts < ttlMs
+}
+
+/** Record a deny and the one-shot override it grants for this session. */
+export function recordDeny(root, { sessionId, rel, now = Date.now(), bytes = 0, fileTokens = 0, sigTokens = 0, ttlMs = STATE_TTL_MS }) {
+  const st = readState(root)
+  st.overrides[`${sessionId}|${rel}`] = now
+  for (const [k, ts] of Object.entries(st.overrides)) {
+    if (!(typeof ts === 'number' && now - ts < ttlMs)) delete st.overrides[k]
+  }
+  st.denyCount += 1
+  st.lastDeny = { rel, at: new Date(now).toISOString(), bytes, fileTokens, sigTokens }
+  try { writeState(root, st) } catch { /* a guard must never fail the session */ }
+}
+
+// ------------------------------------------------------------- decision ---
+
+const kb = (n) => (n / 1024).toFixed(1)
+
+/** The deny reason: size + cost, the signature page, and exactly what to do next. */
+export function buildDenyReason({ rel, bytes, fileTokens, sigText, sigTokens, minBytes, store }) {
+  const syms = (store?.symbolsForPage?.(`file:${rel}`) ?? [])
+    .filter((s) => !['heading', 'test', 'import', 'key'].includes(s.kind))
+    .slice(0, 3)
+  const lines = [
+    `# MemAi guard — ${rel} withheld (${kb(bytes)} KB ≈ ${fileTokens} tok)`,
+    `Whole-file reads above ${kb(minBytes)} KB return signatures first; Read this path again to override for this session.`,
+    `Signatures (index page, ${sigTokens} tok):`,
+    String(sigText ?? '').trim(),
+    'Next moves:',
+    ...syms.map((s, i) => `  fault ${s.name}${i === 0 ? '' : ' --deep'}   # ~300–600 tok`),
+    `  Read ${rel} again   # override`,
+  ]
+  return lines.join('\n')
+}
+
+/**
+ * The whole decision. Order is contractual (tests assert reasons):
+ * enabled -> tool -> path -> root -> whole-file -> allowlist -> exists ->
+ * minBytes -> indexed -> fresh -> page -> cost rule -> override.
+ */
+export function decideGuard({ payload = null, root, env = process.env, cwd = process.cwd(), now = Date.now(), store, pages } = {}) {
+  const cfg = loadGuardConfig({ root, env })
+  if (!cfg.enabled) return { decision: 'allow', reason: 'guard disabled' }
+  if (!cfg.toolNames.includes(guardToolName(payload))) return { decision: 'allow', reason: 'not a guarded read tool' }
+  const raw = guardFilePath(payload)
+  if (!raw) return { decision: 'allow', reason: 'no file path in payload' }
+  const abs = path.resolve(cwd, raw)
+  const rel = path.relative(root, abs).split(path.sep).join('/')
+  if (!rel || rel.startsWith('..') || path.isAbsolute(rel)) return { decision: 'allow', reason: 'outside project root' }
+  const ti = payload?.tool_input ?? payload?.toolInput ?? payload?.inputs ?? {}
+  if (!isWholeFileRead(ti)) return { decision: 'allow', reason: 'partial read' }
+  if (cfg.allow.some((g) => globMatch(g, rel))) return { decision: 'allow', reason: 'allowlisted' }
+
+  let st
+  try { st = fs.statSync(abs) } catch { return { decision: 'allow', reason: 'file missing' } }
+  if (st.size < cfg.minBytes) return { decision: 'allow', reason: 'below minBytes' }
+
+  const row = store.getFile(rel)
+  if (!row) return { decision: 'allow', reason: 'not indexed' }
+  try {
+    if (sha1(fs.readFileSync(abs)) !== row.content_hash) return { decision: 'allow', reason: 'stale index' }
+  } catch { return { decision: 'allow', reason: 'file unreadable' } }
+
+  const sig = pages.get(`file:${rel}`, { budget: SIG_BUDGET })
+  if (!sig?.ok) return { decision: 'allow', reason: 'no page' }
+  const fileTokens = Math.ceil(st.size / 3.966)
+  if (fileTokens < 2 * (sig.tokens + FAULT_EST_TOKENS)) return { decision: 'allow', reason: 'paging would not halve the read' }
+
+  const sessionId = String(payload?.session_id ?? payload?.sessionId ?? 'anon')
+  if (hasOverride(root, { sessionId, rel, now })) return { decision: 'allow', reason: 'override' }
+
+  recordDeny(root, { sessionId, rel, now, bytes: st.size, fileTokens, sigTokens: sig.tokens })
+  const text = buildDenyReason({ rel, bytes: st.size, fileTokens, sigText: sig.text, sigTokens: sig.tokens, minBytes: cfg.minBytes, store })
+  return { decision: 'deny', rel, bytes: st.size, fileTokens, sigTokens: sig.tokens, text }
 }
