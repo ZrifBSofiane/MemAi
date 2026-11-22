@@ -574,7 +574,7 @@ export class MemoryPages {
     }
     const lines = [`# query "${q}" — ${top.length} hit${top.length === 1 ? '' : 's'} (use fault <symbol> or get <pageId>)`]
     for (const h of top) {
-      lines.push(`${h.symbol ? 'sym' : h.kind === 'text' ? 'text' : 'page'} ${h.pageId}${h.line ? `:${h.line}` : ''}  ${h.symbol ? `${h.symbolKind} ${h.symbol}: ` : ''}${(h.snippet || '').slice(0, 120)}${h.stale ? '  [STALE]' : ''}`)
+      lines.push(`${h.symbol ? 'sym' : h.kind === 'text' ? 'text' : 'page'} ${h.pageId}${h.line ? `:${h.line}` : ''}  ${h.symbol ? `${h.symbolKind} ${h.symbol}: ` : ''}${(h.snippet || '').slice(0, 80)}${h.stale ? '  [STALE]' : ''}`)
     }
     if (!top.length) lines.push('(no hits — try a broader term or `map`)')
     if (rgNote) lines.push(`(${rgNote})`)
@@ -585,14 +585,18 @@ export class MemoryPages {
     let text = r.text
     let tokens = r.tokens
     if (body) {
-      const hit = top.find((h) => h.kind === 'symbol' && h.symbol)
-      if (!hit) {
+      // Prefer a callable body, searched over the symbol pool (not just the
+      // displayed hits): the top hit is often a const, and the function that
+      // answers "how does X work" can rank below the visible page.
+      const cands = this.store.symbolSearch(q, { limit: 20 })
+      const chosen = cands.find((s) => ['function', 'method', 'class'].includes(s.kind)) ?? cands[0]
+      if (!chosen) {
         bodySection = { ok: false, error: 'no symbol hit; use get file:<path> for signatures' }
       } else {
-        const f = this.fault(hit.symbol, { budget: DEFAULTS.fault })
+        const f = this.fault(chosen.name, { budget: DEFAULTS.fault })
         bodySection = f.ok
-          ? { ok: true, target: hit.symbol, symbol: hit.symbol, path: f.path ?? hit.path, tokens: f.tokens, text: f.text }
-          : { ok: false, target: hit.symbol, error: f.error }
+          ? { ok: true, target: chosen.name, symbol: chosen.name, path: f.path ?? chosen.path, tokens: f.tokens, text: f.text }
+          : { ok: false, target: chosen.name, error: f.error }
         if (bodySection.ok) {
           text += `\n\nbody: ${bodySection.symbol} (${bodySection.tokens} tok)\n${bodySection.text}`
           tokens += bodySection.tokens

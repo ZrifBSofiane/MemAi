@@ -24,7 +24,8 @@ billed input (a turn re-sends the whole context; page tokens are noise beside it
 - Generic role words (test, file, path, index, tool, …) no longer boost a filename;
   test-name prose is demoted ×0.4; private `_methods` match prefixes.
 - `query` fetches a k-independent candidate pool — the set of hits no longer
-  changes with `k`.
+  changes with `k`; locator previews are 80 chars (was 120), trimming every
+  query response.
 
 ### Eval
 
@@ -33,6 +34,9 @@ billed input (a turn re-sends the whole context; page tokens are noise beside it
 - New development matrix `bench/eval-fixtures-ext.json` (40 fixtures across every
   subsystem): **85% index / 93% hybrid** — it surfaced the ranking gaps fixed above.
   The shipped 12 remain the public baseline, unchanged.
+- Head-to-head re-run (`bench/BENCHMARK-0.7.0.md`): **1,438 vs 4,159** (~2.9×),
+  plus a same-tree A/B of 0.5.0 vs 0.7.0 code: **1,461 → 1,438 (−23, −1.6%)**,
+  with no task more expensive.
 
 ## [0.6.0] — 2026-11-22
 

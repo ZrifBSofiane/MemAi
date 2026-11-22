@@ -413,3 +413,29 @@ test('CLI: query --body and comma batches wire through', async () => {
     assert.equal(JSON.parse(f.stdout.trim()).results.length, 2)
   } finally { store.close() }
 })
+
+test('query --body prefers a callable body over a higher-ranked const', async () => {
+  const dir = tempDir()
+  cleanup.push(dir)
+  const root = path.join(dir, 'project')
+  fs.mkdirSync(path.join(root, 'src'), { recursive: true })
+  fs.writeFileSync(path.join(root, 'package.json'), '{"name":"body-pick","version":"1.0.0","type":"module"}')
+  fs.writeFileSync(path.join(root, 'src', 'watch.js'), [
+    'export const DEBOUNCE_MS = 800',
+    'export function startWatcher() {',
+    '  const pidfile = ".memai/watch.pid"',
+    '  return pidfile',
+    '}',
+    '',
+  ].join('\n'))
+  const store = new MemoryStore({ dbPath: path.join(root, '.memai', 'mem.db'), root })
+  store.setMeta('root', root)
+  const pages = new MemoryPages({ store, root })
+  await pages.index({ maxFiles: 100 })
+  try {
+    const r = pages.query('debounce watcher', { body: true })
+    assert.equal(r.body.ok, true)
+    assert.equal(r.body.symbol, 'startWatcher', `expected the function, got ${r.body.symbol}`)
+    assert.match(r.body.text, /pidfile/)
+  } finally { store.close() }
+})

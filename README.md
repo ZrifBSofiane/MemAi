@@ -83,9 +83,11 @@ reads are already cheap) to 5.50× (a locate task on the real 288-file corpus).
 graphify (v0.9.34) builds a knowledge graph over a corpus (AST for code, LLM
 extraction for docs) with community detection and budgeted graph queries. It is
 the closest tool in spirit, so we compared them on the **same copy of this
-repository** (87 files), same machine, same day. Full method,
+repository** (81 files), same machine, same day. Full method,
 per-question numbers and honest losses in
-[`bench/BENCHMARK-0.5.0.md`](bench/BENCHMARK-0.5.0.md) (earlier records:
+[`bench/BENCHMARK-0.7.0.md`](bench/BENCHMARK-0.7.0.md) — which also contains a
+same-tree A/B of 0.5.0 vs 0.7.0 code (1,461 → **1,438** tokens, no task worse).
+Earlier records: [`bench/BENCHMARK-0.5.0.md`](bench/BENCHMARK-0.5.0.md),
 [`bench/BENCHMARK-0.4.0.md`](bench/BENCHMARK-0.4.0.md),
 [`bench/BENCHMARK-0.3.0.md`](bench/BENCHMARK-0.3.0.md),
 [`bench/GRAPHIFY.md`](bench/GRAPHIFY.md)).
@@ -95,8 +97,8 @@ Across **six questions** spanning task types:
 | | MemAi | graphify 0.9.34 |
 | --- | --- | --- |
 | Per-session instruction overhead | **986 tok** (one MCP tool schema) | 10,351 tok (`skill.md`, loaded per invocation) |
-| Zero-token build coverage | **all 87 files** (code + docs + config) | code files only — docs/papers/images need its LLM extraction (real tokens) |
-| Totals across 6 questions | **1,472 tok — every answer complete** | 4,213 tok — 3 outright misses, 2 truncated, bodies still need file reads |
+| Zero-token build coverage | **all 81 files** (code + docs + config) | code files only — docs/papers/images need its LLM extraction (real tokens) |
+| Totals across 6 questions | **1,438 tok — every answer complete** | 4,159 tok — 3 outright misses, 2 truncated, bodies still need file reads |
 
 - **~2.9× fewer tokens across the six questions** (~10.5× less per-session
   instruction overhead), with the answer being the code itself rather than an
