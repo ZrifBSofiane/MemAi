@@ -43,7 +43,9 @@
     "test": "node --test \"test/*.test.mjs\"",
     "selftest": "node bench/selftest.mjs",
     "bench": "node bench/bench.mjs",
-    "probe": "node scripts/mcp-probe.mjs"
+    "probe": "node scripts/mcp-probe.mjs",
+    "bench:cost": "node bench/cost.mjs",
+    "bench:ab": "node tools/cost-ab.mjs"
   },
   "keywords": [
     "ai-agent",
