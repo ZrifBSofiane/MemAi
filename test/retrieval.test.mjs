@@ -33,8 +33,10 @@ test('query --rg finds body-only content the index never pages', async () => {
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
   try {
     // "amount must be positive" appears only inside createInvoice's body — file pages carry signatures, not bodies.
+    // A zero-hit index query now auto-runs the rg pass; the explicit flag remains available.
     const bare = pages.query('amount must be positive', { k: 5 })
-    assert.equal(bare.hits.length, 0, 'index-only query must miss body text')
+    assert.ok(bare.hits.length >= 1, 'zero-hit index query auto-runs rg')
+    assert.match(bare.rgNote ?? '', /auto-rg/)
 
     // Fresh files can be briefly unreadable to rg (AV scans) → partial results;
     // retry briefly until the body line shows up instead of flaking.
