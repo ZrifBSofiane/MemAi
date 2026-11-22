@@ -84,6 +84,12 @@ the hook contract includes `permissionDecision`, `permissionDecisionReason` and 
 `PreToolUse` accepts a process hook with a tool-name matcher. A second read of the same path
 overrides for the session; `memai guard status` shows the effective config and deny count.
 
+**Trust gate (verified the hard way):** a hook entry added to `config.json` by hand does **not**
+run until ZCode marks it trusted — the runtime classifies it `workspace_hooks_pending_trust`
+with `effectiveRunnable: false` and skips it silently. Grant trust through the app's hooks
+review; until then the guard is inert. Check `memai guard status` (deny count stays 0 when the
+hook never ran) before concluding the guard is misconfigured.
+
 ## Instructions
 
 ZCode resolves agent instructions from `AGENTS.md`: the workspace file (walking up to the project
