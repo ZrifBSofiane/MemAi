@@ -17,14 +17,14 @@ function fixtureDb() {
   const dbPath = path.join(dir, 'zcode.db')
   const db = new DatabaseSync(dbPath)
   db.exec(`
-    CREATE TABLE session (id TEXT, directory TEXT, title TEXT, time_created INTEGER);
+    CREATE TABLE session (id TEXT, directory TEXT, title TEXT, time_created INTEGER, parent_id TEXT);
     CREATE TABLE turn_usage (session_id TEXT, turn_id TEXT, input_tokens INTEGER, output_tokens INTEGER,
       reasoning_tokens INTEGER, cache_read_input_tokens INTEGER, cache_creation_input_tokens INTEGER);
     CREATE TABLE part (id TEXT, session_id TEXT, time_created INTEGER, data TEXT);
   `)
-  const addSession = db.prepare('INSERT INTO session VALUES (?,?,?,?)')
-  addSession.run('sess_a', 'D:/Projects/MemAI', 'task A', 1000)
-  addSession.run('sess_b', 'D:/Projects/Other', 'task B', 2000)
+  const addSession = db.prepare('INSERT INTO session VALUES (?,?,?,?,?)')
+  addSession.run('sess_a', 'D:/Projects/MemAI', 'task A', 1000, null)
+  addSession.run('sess_b', 'D:/Projects/Other', 'task B', 2000, null)
   const addTurn = db.prepare('INSERT INTO turn_usage VALUES (?,?,?,?,?,?,?)')
   addTurn.run('sess_a', 't1', 1000, 50, 0, 900, 0)
   addTurn.run('sess_a', 't2', 2000, 60, 10, 1800, 100)
