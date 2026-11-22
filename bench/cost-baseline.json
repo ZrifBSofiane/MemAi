@@ -1,0 +1,42 @@
+{
+  "surfaces": {
+    "schema": 996,
+    "instructions": 208,
+    "initBlock": 518,
+    "skillFrontmatter": 222,
+    "card": 282,
+    "total": 2226
+  },
+  "delivered": [
+    {
+      "id": "B1-query",
+      "jsonTokens": 405,
+      "textTokens": 132
+    },
+    {
+      "id": "B1-fault",
+      "jsonTokens": 673,
+      "textTokens": 595
+    },
+    {
+      "id": "B2",
+      "jsonTokens": 228,
+      "textTokens": 125
+    },
+    {
+      "id": "B3",
+      "jsonTokens": 445,
+      "textTokens": 192
+    },
+    {
+      "id": "B5",
+      "jsonTokens": 689,
+      "textTokens": 218
+    },
+    {
+      "id": "B6",
+      "jsonTokens": 126,
+      "textTokens": 66
+    }
+  ]
+}

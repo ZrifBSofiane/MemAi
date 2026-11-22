@@ -129,16 +129,17 @@ function flag(argv, name) {
 
 function main() {
   const argv = process.argv.slice(2)
-  const root = flag(argv, '--root') ?? process.cwd()
-  const turns = Number(flag(argv, '--turns') ?? 10)
+  const root = flag(argv, 'root') ?? process.cwd()
+  const turns = Number(flag(argv, 'turns') ?? 10)
+  const baselineFile = flag(argv, 'baseline-file') ?? BASELINE_PATH
   const r = measure({ root, turns })
   process.stdout.write((argv.includes('--json') ? JSON.stringify(r, null, 2) : renderReport(r)) + '\n')
   if (argv.includes('--write-baseline')) {
-    fs.writeFileSync(BASELINE_PATH, JSON.stringify(baselineFrom(r), null, 2) + '\n')
-    process.stderr.write(`baseline written to ${BASELINE_PATH}\n`)
+    fs.writeFileSync(baselineFile, JSON.stringify(baselineFrom(r), null, 2) + '\n')
+    process.stderr.write(`baseline written to ${baselineFile}\n`)
   }
   if (argv.includes('--check')) {
-    const baseline = JSON.parse(fs.readFileSync(BASELINE_PATH, 'utf8'))
+    const baseline = JSON.parse(fs.readFileSync(baselineFile, 'utf8'))
     const worse = compareBaseline(r, baseline)
     if (worse.length) {
       process.stderr.write(`cost regression:\n${worse.map((w) => `  ${w.kind} ${w.name}: ${w.base} -> ${w.now}`).join('\n')}\n`)

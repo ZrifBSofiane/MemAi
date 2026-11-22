@@ -3,6 +3,8 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
+import { spawnSync } from 'node:child_process'
+import { fileURLToPath } from 'node:url'
 import { tempDir } from '../scripts/test-helpers.mjs'
 import { MemoryStore } from '../src/store.mjs'
 import { MemoryPages } from '../src/page.mjs'
@@ -81,4 +83,23 @@ test('compareBaseline reports growth per surface and per call', async () => {
   const worse = compareBaseline(r, shrunk)
   assert.equal(worse.length, 2)
   assert.match(worse.map((w) => w.name).join(' '), /schema|q1/)
+})
+
+const SELF = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
+const COST = path.join(SELF, 'bench', 'cost.mjs')
+
+test('CLI --write-baseline then --check passes, and fails on a shrunken baseline', async () => {
+  const root = await fixture()
+  const base = path.join(root, 'baseline.json')
+  const run = (...args) => spawnSync(process.execPath, [COST, '--root', root, '--baseline-file', base, ...args], { cwd: SELF, encoding: 'utf8' })
+  const write = run('--write-baseline')
+  assert.equal(write.status, 0, write.stderr)
+  const clean = run('--check')
+  assert.equal(clean.status, 0, clean.stderr)
+  const shrunk = JSON.parse(fs.readFileSync(base, 'utf8'))
+  shrunk.surfaces.schema = Math.max(1, shrunk.surfaces.schema - 1)
+  fs.writeFileSync(base, JSON.stringify(shrunk) + '\n')
+  const bad = run('--check')
+  assert.equal(bad.status, 1, 'a shrunken baseline must fail the check')
+  assert.match(bad.stderr, /cost regression/)
 })

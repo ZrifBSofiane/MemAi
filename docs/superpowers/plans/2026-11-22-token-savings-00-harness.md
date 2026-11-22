@@ -435,8 +435,8 @@ function flag(argv, name) {
 
 function main() {
   const argv = process.argv.slice(2)
-  const root = flag(argv, '--root') ?? process.cwd()
-  const turns = Number(flag(argv, '--turns') ?? 10)
+  const root = flag(argv, 'root') ?? process.cwd()
+  const turns = Number(flag(argv, 'turns') ?? 10)
   const r = measure({ root, turns })
   process.stdout.write((argv.includes('--json') ? JSON.stringify(r, null, 2) : renderReport(r)) + '\n')
   if (argv.includes('--write-baseline')) {
@@ -547,17 +547,17 @@ Expected: fails because `--baseline-file` is not handled yet (the CLI writes to 
 In `bench/cost.mjs`, find:
 
 ```js
-  const root = flag(argv, '--root') ?? process.cwd()
-  const turns = Number(flag(argv, '--turns') ?? 10)
+  const root = flag(argv, 'root') ?? process.cwd()
+  const turns = Number(flag(argv, 'turns') ?? 10)
   const r = measure({ root, turns })
 ```
 
 Replace with:
 
 ```js
-  const root = flag(argv, '--root') ?? process.cwd()
-  const turns = Number(flag(argv, '--turns') ?? 10)
-  const baselineFile = flag(argv, '--baseline-file') ?? BASELINE_PATH
+  const root = flag(argv, 'root') ?? process.cwd()
+  const turns = Number(flag(argv, 'turns') ?? 10)
+  const baselineFile = flag(argv, 'baseline-file') ?? BASELINE_PATH
   const r = measure({ root, turns })
 ```
 
@@ -822,15 +822,15 @@ function flag(argv, name) {
 
 function main() {
   const argv = process.argv.slice(2)
-  const setName = flag(argv, '--tasks') ?? 'payload'
+  const setName = flag(argv, 'tasks') ?? 'payload'
   const tasks = TASK_SETS[setName]
   if (!tasks) {
     process.stderr.write(`unknown --tasks ${setName}; use ${Object.keys(TASK_SETS).join('|')}\n`)
     process.exitCode = 2
     return
   }
-  const baseline = flag(argv, '--baseline')
-  const treatment = flag(argv, '--treatment')
+  const baseline = flag(argv, 'baseline')
+  const treatment = flag(argv, 'treatment')
   if (argv.includes('--dry-run')) {
     process.stdout.write(`# dry run [${setName}] — ${tasks.length} tasks × 2 arms = ${tasks.length * 2} sessions\n`)
     process.stdout.write(`baseline:  ${baseline ?? '(missing --baseline)'}\n`)
@@ -853,7 +853,7 @@ function main() {
     }
   }
   const verdict = gate(rows)
-  const label = flag(argv, '--label') ?? setName
+  const label = flag(argv, 'label') ?? setName
   const stamp = new Date().toISOString().slice(0, 10)
   const md = `# live cost A/B [${label}] — ${stamp}\n\n${renderTable(rows)}\n\n${verdict.ok ? 'PASS' : 'FAIL'}: ${verdict.failures.length ? verdict.failures.join('; ') : `total ${verdict.treatTotal} < ${verdict.baseTotal}`}\n`
   fs.writeFileSync(path.join(OUT, `cost-ab-${stamp}-${label}.json`), JSON.stringify({ date: stamp, set: setName, dirs: { baseline, treatment }, verdict, rows }, null, 2) + '\n')
