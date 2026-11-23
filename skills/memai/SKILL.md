@@ -4,7 +4,7 @@ description: Use MemAi's paged memory in a repository with a .memai store instea
 license: MIT
 compatibility: Requires a project with a MemAi store (`memai init`, Node >= 22.13) and either the `mem` MCP tool or the `memai` CLI on PATH. Local-only; no network. Works in Agent Skills clients including Claude Code, OpenCode, Codex, ZCode, DSH and generic SKILL.md hosts.
 metadata:
-  version: "0.8.0"
+  version: "0.9.0"
   docs: https://github.com/ZrifBSofiane/MemAi
   pager: .memai/mem.db
 ---

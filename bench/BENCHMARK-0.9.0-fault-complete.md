@@ -19,8 +19,11 @@ Baseline: 0.8.0 (`720e52c`). Estimator `ceil(chars / 3.966)`.
 | 0.9.0 | `96L tokens=1119/1200 (complete)` |
 
 Explicit budgets are unchanged: `--budget 300` → `262/300 (truncated: 73 more lines)`.
-The fixed surfaces are unchanged; `bench/cost.mjs --check` stays clean. The
-canonical `B1-fault` probe uses an explicit 600, so it still measures 595.
+Fixed surfaces are unchanged. The fault markers add 3 tokens to complete fault
+rows (`B2` 128, `B6` 69) and trim `B1-fault` slightly through line-granular
+clamping; the 0.9.0 cost baseline is re-pinned in
+`bench/COST-BASELINE-0.9.0.md`. The canonical `B1-fault` probe uses an explicit
+600, so it measures 557 rather than the default 1,200.
 
 ## Live A/B (3 tasks × 2 arms, same corpus, CLI-only)
 
