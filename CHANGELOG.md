@@ -4,6 +4,25 @@ All notable changes to this project are documented here. The format is loosely
 based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the
 project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.0] — 2026-11-23
+
+### Changed
+
+- **`fault` defaults to a complete body (1,200 tokens) and labels every slice
+  `(complete)` or `(truncated: N more lines)`.** Explicit `--budget` still wins.
+  When truncation forced a follow-up, the 0.8.0 session needed a grep or a
+  whole-file read; the complete slice answered in one call.
+- `query --body` uses the same default, so its body is complete for functions
+  up to 1,200 tokens.
+
+### Measured
+
+- Live same-corpus A/B: **522,798 → 358,362** billed input (**−31.5 %**). The
+  watcher-debounce task went **−58.2 %** because the baseline's grep + Read
+  disappeared. `indexFiles` +0.17 %, `query --body` +1.4 % — the accepted cost of
+  a complete slice when the truncated one already sufficed. Details:
+  `bench/BENCHMARK-0.9.0-fault-complete.md`.
+
 ## [0.8.0] — 2026-11-22
 
 ### Fixed

@@ -24,7 +24,7 @@ import { MemoryStore } from '../src/store.mjs'
 import { MemoryPages } from '../src/page.mjs'
 
 export const PRODUCT = 'MemAi'
-export const VERSION = '0.8.0'
+export const VERSION = '0.9.0'
 export const STORE_DIR = '.memai'
 export const DB_FILE = 'mem.db'
 export const LEGACY_STORE_DIRS = ['.memory', '.mempages']

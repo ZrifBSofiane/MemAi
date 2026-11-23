@@ -51,3 +51,18 @@ test('query auto-runs ripgrep when the index has no hits', async () => {
     assert.match(r.rgNote ?? '', /auto-rg/)
   } finally { store.close() }
 })
+
+test('fault returns a complete large body by default and marks it', async () => {
+  const { root, store, pages } = await fixture()
+  try {
+    const big = Array.from({ length: 80 }, (_, i) => `  const v${i} = ${i}`).join('\n')
+    fs.writeFileSync(path.join(root, 'src', 'big.js'), `export function bigFunction() {\n${big}\n  return v79\n}\n`)
+    await pages.index({ maxFiles: 100 })
+    const full = pages.fault('bigFunction')
+    assert.equal(full.truncated, false, 'default should complete an 80-line body')
+    assert.match(full.text, /\(complete\)/)
+    const small = pages.fault('bigFunction', { budget: 200 })
+    assert.equal(small.truncated, true)
+    assert.match(small.text, /\(truncated: \d+ more lines?\)/)
+  } finally { store.close() }
+})

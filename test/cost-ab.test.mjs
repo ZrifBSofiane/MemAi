@@ -87,3 +87,11 @@ test('gate allows a small cost tolerance on a correctness probe', () => {
   rows[1].billedInput = 103000
   assert.equal(gate(rows).ok, false)
 })
+
+test('fault-completeness task set uses one local CLI fault per task', () => {
+  assert.deepEqual(TASK_SETS.faultcomplete.map((t) => t.id), ['FC1', 'FC2', 'FC3'])
+  for (const t of TASK_SETS.faultcomplete) {
+    assert.equal(t.requireCli, true)
+    assert.match(t.prompt, /node bin\/memai\.mjs fault/)
+  }
+})

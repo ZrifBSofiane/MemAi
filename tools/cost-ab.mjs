@@ -57,6 +57,29 @@ export const TASK_SETS = {
       prompt: 'Use exactly one local CLI call: `node bin/memai.mjs query "breakerLogged" --text`. Answer with the file path that contains that token. Do not use the MCP tool, a globally installed `memai`, or grep.',
     },
   ],
+  faultcomplete: [
+    {
+      id: 'FC1',
+      requireCli: true,
+      tolerancePct: 1,
+      expect: /flushDelayMs|DEBOUNCE_MS/,
+      prompt: 'Use exactly one local CLI call: `node bin/memai.mjs fault startWatcher --text`. Explain how the watcher debounce delay is computed. Answer with the function name.',
+    },
+    {
+      id: 'FC2',
+      requireCli: true,
+      tolerancePct: 1,
+      expect: /reuse|content_hash|version/i,
+      prompt: 'Use exactly one local CLI call: `node bin/memai.mjs fault "src/extract.mjs#indexFiles" --text`. Explain how it decides to reuse a file.',
+    },
+    {
+      id: 'FC3',
+      requireCli: true,
+      tolerancePct: 1,
+      expect: /body|source|score/i,
+      prompt: 'Use exactly one local CLI call: `node bin/memai.mjs fault "src/page.mjs#query" --text`. Explain how `--body` chooses a symbol.',
+    },
+  ],
 }
 
 export function gate(rows) {

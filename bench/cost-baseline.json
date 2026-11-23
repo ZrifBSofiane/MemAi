@@ -15,13 +15,13 @@
     },
     {
       "id": "B1-fault",
-      "jsonTokens": 673,
-      "textTokens": 595
+      "jsonTokens": 635,
+      "textTokens": 557
     },
     {
       "id": "B2",
-      "jsonTokens": 228,
-      "textTokens": 125
+      "jsonTokens": 231,
+      "textTokens": 128
     },
     {
       "id": "B3",
@@ -35,8 +35,8 @@
     },
     {
       "id": "B6",
-      "jsonTokens": 126,
-      "textTokens": 66
+      "jsonTokens": 129,
+      "textTokens": 69
     }
   ]
 }
