@@ -23,7 +23,7 @@ import { estTokens, clampText } from './tokens.mjs'
 import { EXTRACTOR_VERSION, KEYWORDS, langOf, isTestPath, isDocPath } from './extract.mjs'
 
 export const DEFAULTS = {
-  card: 700, map: 3500, get: 1200, fault: 600, query: 400, diff: 600, graph: 500, pack: 1500,
+  card: 700, map: 3500, get: 1200, fault: 1200, query: 400, diff: 600, graph: 500, pack: 1500,
 }
 export const PAGE_KINDS = ['project.card', 'project.map', 'file:<path>', 'board:<topic>']
 
@@ -430,6 +430,7 @@ export class MemoryPages {
     }
     const header = (body) =>
       `# fault ${best.name} (${best.kind}) ${best.path}:${startLine}-${sl.end}  ${sl.end - sl.start}L  tokens=${body.tokens}/${budget}` +
+      (body.truncated ? `  (truncated: ${body.omittedLines ?? '?'} more lines)` : '  (complete)') +
       (stale ? '  [STALE: file changed since index — lines approximate]' : '') +
       (candidates.length > 1 ? `  (+${candidates.length - 1} other match${candidates.length > 2 ? 'es' : ''}: ${candidates.slice(1, 3).map((c) => `${c.path}:${c.line}`).join(', ')})` : '') +
       `\n# file page: get file:${best.path}`
@@ -454,7 +455,7 @@ export class MemoryPages {
     const code = lines.slice(from, to).map((l, i) => `${from + i + 1}| ${l}`).join('\n')
     const s = this._fileStale(f)
     const stale = s ? s.stale : null
-    const r = fitWithHeader(code, budget, (body) => `# fault ${f.path}:${line}  showing ${from + 1}-${to} of ${lines.length}  tokens=${body.tokens}/${budget}${stale ? '  [STALE: file changed since index]' : ''}`)
+    const r = fitWithHeader(code, budget, (body) => `# fault ${f.path}:${line}  showing ${from + 1}-${to} of ${lines.length}  tokens=${body.tokens}/${budget}${body.truncated ? `  (truncated: ${body.omittedLines ?? '?'} more lines)` : '  (complete)'}${stale ? '  [STALE: file changed since index]' : ''}`)
     return { ok: true, target: `${p}:${line}`, mode: 'line', path: f.path, line, lineEnd: to, stale, tokens: r.tokens, budget, truncated: r.truncated, text: r.text }
   }
 
