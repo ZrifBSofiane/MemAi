@@ -98,6 +98,22 @@ export const TASK_SETS = {
       prompt: 'Use the card version and show what changed since it, including the body of the function that decides to reuse unchanged files. Use the local CLI (`node bin/memai.mjs`); do not use grep or the MCP tool.',
     },
   ],
+  ranking: [
+    {
+      id: 'R1',
+      requireCli: true,
+      tolerancePct: 1,
+      expect: /bench\/bench\.mjs/,
+      prompt: 'Use exactly one local CLI call: `node bin/memai.mjs query "benchmark naive handoff scenarios" --text`. Answer with the file path that defines those scenarios. Do not use grep or the MCP tool.',
+    },
+    {
+      id: 'R2',
+      requireCli: true,
+      tolerancePct: 1,
+      expect: /src\/store\.mjs/,
+      prompt: 'Use exactly one local CLI call: `node bin/memai.mjs query "retrieval miss statistics per tool" --rg --text`. Answer with the file path that implements the miss log. Do not use grep or the MCP tool.',
+    },
+  ],
 }
 
 export function gate(rows) {
