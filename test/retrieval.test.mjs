@@ -474,3 +474,45 @@ test('query --body prefers the matching source callable over docs headings', asy
     assert.match(r.body.text, /pidfile/)
   } finally { store.close() }
 })
+
+test('query --body --deep and diff --faults compose in one call', async () => {
+  const { store, pages } = await project()
+  try {
+    const q = pages.query('verifyToken', { body: true, deep: true })
+    assert.equal(q.body.ok, true)
+    const card = pages.card().text
+    const m = card.match(/^version: ([0-9a-f]{8})$/m)
+    assert.ok(m, 'card has no version line')
+    const d = pages.diff({ since: m[1], faults: ['verifyToken'] })
+    assert.equal(d.ok, true, d.error)
+    assert.match(d.text, /# slices/)
+    assert.match(d.text, /verifyToken/)
+  } finally { store.close() }
+})
+
+test('fault --deep names same-file callers', async () => {
+  const dir = tempDir()
+  cleanup.push(dir)
+  const root = path.join(dir, 'project')
+  fs.mkdirSync(path.join(root, 'src'), { recursive: true })
+  fs.writeFileSync(path.join(root, 'package.json'), '{"name":"deep-fixture","version":"1.0.0","type":"module"}')
+  fs.writeFileSync(path.join(root, 'src', 'a.js'), [
+    'export function callee() { return 1 }',
+    'export function caller() { return callee() }',
+    '',
+  ].join('\n'))
+  const store = new MemoryStore({ dbPath: path.join(root, '.memai', 'mem.db'), root })
+  store.setMeta('root', root)
+  const pages = new MemoryPages({ store, root })
+  await pages.index({ maxFiles: 100 })
+  try {
+    let f = pages.fault('callee', { deep: true })
+    for (let i = 0; i < 10 && !/caller/.test(f.text); i++) {
+      await new Promise((r) => setTimeout(r, 300))
+      f = pages.fault('callee', { deep: true })
+    }
+    assert.equal(f.ok, true)
+    assert.match(f.text, /# deep callers/)
+    assert.match(f.text, /caller/)
+  } finally { store.close() }
+})

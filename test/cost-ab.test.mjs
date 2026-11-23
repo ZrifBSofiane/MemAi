@@ -95,3 +95,12 @@ test('fault-completeness task set uses one local CLI fault per task', () => {
     assert.match(t.prompt, /node bin\/memai\.mjs fault/)
   }
 })
+
+test('composite task set requires fewer local CLI calls', () => {
+  assert.deepEqual(TASK_SETS.composite.map((t) => t.id), ['C1', 'C2'])
+  for (const t of TASK_SETS.composite) {
+    assert.equal(t.requireCli, true)
+    assert.equal(t.requireFewerCalls, true)
+    assert.match(t.prompt, /node bin\/memai\.mjs/)
+  }
+})

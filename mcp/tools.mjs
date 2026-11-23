@@ -78,7 +78,7 @@ function memInputSchema() {
       k: { type: 'integer', minimum: 1, maximum: 20, description: 'query: number of ranked hits (default 5).' },
       rg: { type: 'boolean', description: 'query: also union a ripgrep pass over file bodies (ground-truth net for content the index does not page).' },
       body: { type: 'boolean', description: 'query: also return the top symbol body in the same call — locate and read in one model turn.' },
-      deep: { type: 'boolean', description: 'fault: append one-hop context (callees + best-effort callers).' },
+      deep: { type: 'boolean', description: 'fault/query: append one-hop callees + callers.' },
       foundBy: { type: 'string', description: 'miss: which tool found it (rg | grep | manual).' },
       hitPath: { type: 'string', description: 'miss: where it was found (path or page id).' },
       stats: { type: 'boolean', description: 'miss: return miss stats instead of recording one.' },
@@ -86,7 +86,7 @@ function memInputSchema() {
       target: { type: 'string', description: 'fault: symbol, path#symbol, path:line, or path. graph/affected: a path or symbol.' },
       target2: { type: 'string', description: 'graph: second endpoint; with target returns the shortest import path between them.' },
       card: { type: 'boolean', description: 'pack: include the project card (default true).' },
-      faults: { type: 'string', description: 'pack: comma-separated symbols to include as short slices.' },
+      faults: { type: 'string', description: 'pack/diff: comma-separated symbols to include as short slices.' },
       last: { type: 'boolean', description: 'diff: diff since the last checkpoint for your agent (use diff checkpoint:true first).' },
       checkpoint: { type: 'boolean', description: 'diff: record the current version for your agent so a later last:true can resume.' },
       pageId: { type: 'string', description: 'get: file:<path> | project.card | project.map | board:<topic>. Comma-separate to batch several pages.' },
@@ -280,7 +280,7 @@ export async function dispatch({ root = null, db = null, env = process.env, cwd 
         return toToolResult(op, pages.status())
       case 'diff': {
         if (args.checkpoint) return toToolResult(op, pages.checkpoint(str(args.agent) || defaultAgent(env)))
-        return toToolResult(op, pages.diff({ since: str(args.since) || null, budget: budgetFor('diff', args), last: !!args.last, agent: str(args.agent) || defaultAgent(env) }))
+        return toToolResult(op, pages.diff({ since: str(args.since) || null, budget: budgetFor('diff', args), last: !!args.last, agent: str(args.agent) || defaultAgent(env), faults: args.faults ? String(args.faults) : [] }))
       }
       case 'graph': {
         const target = str(args.target)
@@ -304,7 +304,7 @@ export async function dispatch({ root = null, db = null, env = process.env, cwd 
       case 'query': {
         const q = str(args.q)
         if (!q) return errorResult(op, 'query requires q (search terms or a symbol name)')
-        return toToolResult(op, pages.query(q, { k: clampInt(args.k, 5, 1, 20), budget: budgetFor('query', args), rg: !!args.rg, body: !!args.body }))
+        return toToolResult(op, pages.query(q, { k: clampInt(args.k, 5, 1, 20), budget: budgetFor('query', args), rg: !!args.rg, body: !!args.body, deep: !!args.deep }))
       }
       case 'fault': {
         const target = str(args.target)
