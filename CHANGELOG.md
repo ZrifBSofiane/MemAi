@@ -4,6 +4,23 @@ All notable changes to this project are documented here. The format is loosely
 based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the
 project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.0] — 2026-11-24
+
+### Fixed
+
+- **Docs pages no longer drown code in retrieval.** A docs filename match could
+  add +3 `pathBoost` to a page (3.4 total) and outrank every code page for
+  token/doc queries. Docs now cap at 0.7 in both the FTS page score and `--rg`
+  text hits; tests keep their page demotion.
+
+### Measured
+
+- Same-tree eval A/B: shipped **100 % recall**, MRR **0.68/0.61 → 0.80/0.74**;
+  extended recall **83/88 → 85/90 %**, MRR **0.56/0.50 → 0.62/0.58**. No recall
+  loss. Two fixtures flipped: `bench handoff` (index) and `retrieval miss`
+  (hybrid). A path-matched page injection was tested and rejected (MRR down).
+  Details: `bench/BENCHMARK-0.11.0-ranking.md`.
+
 ## [0.10.0] — 2026-11-23
 
 ### Added
