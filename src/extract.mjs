@@ -542,15 +542,23 @@ export function distilFile(store, f, { force = false } = {}) {
   const prevPage = prev ? store.getPage(`file:${f.path}`) : null
   const expectedVersion = filePageVersion(f.path, contentHash)
   if (!force && prev && prev.content_hash === contentHash && prevPage && prevPage.version_hash === expectedVersion) {
-    // Unchanged content: reuse symbol rows, only refresh mtime/tokens if needed.
+    // Unchanged content: reuse symbol rows, but refresh the file row's mtime and
+    // derived columns. Otherwise a checkout/merge that touches mtimes leaves the
+    // quick stale scan reporting changed files forever.
     const symbols = store.symbolsForPage(`file:${f.path}`)
+    const tokens = prev.tokens || estTokens(text)
+    const looksEsm = /\bimport\s|\bexport\s/.test(text.slice(0, 20000)) ? 1 : 0
+    const looksCjs = /\brequire\s*\(|module\.exports/.test(text.slice(0, 20000)) ? 1 : 0
+    if (prev.mtime !== f.mtime || prev.tokens !== tokens) {
+      store.upsertFile({ path: f.path, contentHash, bytes: f.bytes, loc: prev.loc, lang, mtime: f.mtime, tokens, looksEsm, looksCjs })
+    }
     return {
       reused: true,
       record: {
-        rel: f.path, lang, bytes: f.bytes, loc: prev.loc, contentHash, tokens: prev.tokens || estTokens(text),
+        rel: f.path, lang, bytes: f.bytes, loc: prev.loc, contentHash, tokens,
         symbols: symbols.map((s) => ({ name: s.name, kind: s.kind, line: s.line, signature: s.signature })),
         imports: store.importsForFile(f.path),
-        looksEsm: /\bimport\s|\bexport\s/.test(text.slice(0, 20000)), looksCjs: /\brequire\s*\(|module\.exports/.test(text.slice(0, 20000)),
+        looksEsm: !!looksEsm, looksCjs: !!looksCjs,
       },
     }
   }

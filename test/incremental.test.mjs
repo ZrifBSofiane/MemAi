@@ -100,3 +100,16 @@ test('isIndexableRel mirrors the walk gates', () => {
   assert.equal(isIndexableRel('deep/../auth.js'), false)
   assert.equal(isIndexableRel(''), false)
 })
+
+test('reusing content-identical files refreshes mtime so the stale scan stays clean', async () => {
+  const { root, store, pages } = await project()
+  try {
+    const file = path.join(root, 'src', 'auth.js')
+    const future = new Date(Date.now() + 60_000)
+    fs.utimesSync(file, future, future)
+    assert.ok(pages._staleScan().changed >= 1, 'mtime-only change should look stale before re-index')
+    const r = await pages.index({ maxFiles: 500 })
+    assert.ok(r.reused >= 1, 'content-identical file should be reused')
+    assert.equal(pages._staleScan().changed, 0, 'reuse must refresh the stored mtime')
+  } finally { store.close() }
+})
