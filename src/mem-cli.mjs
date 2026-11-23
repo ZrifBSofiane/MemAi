@@ -11,7 +11,7 @@ import { MemoryStore } from './store.mjs'
 import { MemoryPages, DEFAULTS } from './page.mjs'
 import { estTokens } from './tokens.mjs'
 
-export const VERSION = '0.9.0'
+export const VERSION = '0.10.0'
 
 const HELP = `MemAi CLI  (tokens are the currency; every response has a token count)
 
@@ -131,6 +131,7 @@ export async function run(argv, { env = null } = {}) {
         ...pages.diff({
           since: flags.since ?? null, budget: num(flags.budget, DEFAULTS.diff),
           last: !!flags.last, agent: String(flags.agent ?? (process.env.MEMAI_AGENT ?? process.env.MEM_AGENT) ?? 'anon'),
+          faults: flags.faults ? String(flags.faults).split(',') : [],
         }),
       }
       case 'checkpoint': {
@@ -178,8 +179,8 @@ export async function run(argv, { env = null } = {}) {
       }
       case 'query': {
         const q = positional.slice(1).join(' ')
-        if (!q) return { ok: false, cmd, error: 'usage: query <terms> [--rg] [--k N] [--body]', tokens: 0 }
-        return { ok: true, cmd, ...pages.query(q, { k: num(flags.k, 5), budget: num(flags.budget, DEFAULTS.query), rg: !!flags.rg, body: !!flags.body }) }
+        if (!q) return { ok: false, cmd, error: 'usage: query <terms> [--rg] [--k N] [--body] [--deep]', tokens: 0 }
+        return { ok: true, cmd, ...pages.query(q, { k: num(flags.k, 5), budget: num(flags.budget, DEFAULTS.query), rg: !!flags.rg, body: !!flags.body, deep: !!flags.deep }) }
       }
       case 'fault': {
         const target = positional.slice(1).join(' ')
