@@ -4,6 +4,24 @@ All notable changes to this project are documented here. The format is loosely
 based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the
 project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.0] — 2026-11-23
+
+### Added
+
+- **`query --body --deep`**: locate, materialise the selected body and append its
+  one-hop callees/callers in one call.
+- **`diff --faults a,b`**: append slices of named symbols to a resume delta, so
+  “what changed and show me the code” is one call.
+- **Same-file deep callers**: `fault --deep` resolves call sites in the same file
+  to the enclosing function instead of discarding them.
+
+### Measured
+
+- Live same-corpus A/B: **2,278,097 → 1,628,843** billed input (**−28.5 %**) and
+  **25 → 18** local CLI calls. The caller task went **−47.6 %** (13 → 7 calls);
+  the resume-slice task used one fewer call but **+5.6 %** billed input, an
+  accepted trade recorded in `bench/BENCHMARK-0.10.0-composite.md`.
+
 ## [0.9.0] — 2026-11-23
 
 ### Changed

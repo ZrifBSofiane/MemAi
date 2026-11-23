@@ -1,0 +1,94 @@
+{
+  "date": "2026-11-23",
+  "set": "composite",
+  "dirs": {
+    "baseline": "D:\\Projects\\MemAi-cobase",
+    "treatment": "D:\\Projects\\MemAi-cotreat"
+  },
+  "verdict": {
+    "ok": false,
+    "failures": [
+      "C2: treatment 864533 > baseline 818401 (+1% tolerance)"
+    ],
+    "baseTotal": 2278097,
+    "treatTotal": 1628843
+  },
+  "rows": [
+    {
+      "id": "C1",
+      "arm": "baseline",
+      "dir": "D:\\Projects\\MemAi-cobase",
+      "session": "sess_c902d435-3a5b-4324-af9b-e14ed6eb025a",
+      "exit": 0,
+      "ok": true,
+      "billedInput": 1459696,
+      "turns": 1,
+      "toolCalls": 14,
+      "toolErrors": 0,
+      "cliCalls": 13,
+      "memCalls": 0,
+      "valid": true,
+      "requireFewerCalls": true,
+      "tolerancePct": 1,
+      "correct": true,
+      "stdoutTail": " in their bodies; no other module calls `distilFile` directly. Note that the index's `--deep` caller list only surfaced a CHANGELOG call-site, missing both same-file callers, so I confirmed them from the function bodies.\n\nFor context, the path on to them is indirect through `MemoryPages.index` / `MemoryPages.indexFiles` (`src/page.mjs:111`, `:116`), which delegate to `indexCorpus` / `indexFiles`.\n"
+    },
+    {
+      "id": "C2",
+      "arm": "baseline",
+      "dir": "D:\\Projects\\MemAi-cobase",
+      "session": "sess_c8281c77-2b10-4136-8c01-fc6df06bf831",
+      "exit": 0,
+      "ok": true,
+      "billedInput": 818401,
+      "turns": 1,
+      "toolCalls": 13,
+      "toolErrors": 0,
+      "cliCalls": 12,
+      "memCalls": 0,
+      "valid": true,
+      "requireFewerCalls": true,
+      "tolerancePct": 1,
+      "correct": true,
+      "stdoutTail": "\nThe reuse gate is the compound condition at `src/extract.mjs:542`: content hash matches the stored file row **and** the page's version hash equals `filePageVersion(path, contentHash)` (which folds in `EXTRACTOR_VERSION`), unless `--force`. On reuse it keeps the symbol/import rows and only rewrites the file row when mtime or token count drifted; otherwise it re-extracts and re-upserts everything.\n"
+    },
+    {
+      "id": "C1",
+      "arm": "treatment",
+      "dir": "D:\\Projects\\MemAi-cotreat",
+      "session": "sess_a6f24e90-4335-4b57-91eb-9855647324a9",
+      "exit": 0,
+      "ok": true,
+      "billedInput": 764310,
+      "turns": 1,
+      "toolCalls": 8,
+      "toolErrors": 0,
+      "cliCalls": 7,
+      "memCalls": 0,
+      "valid": true,
+      "requireFewerCalls": true,
+      "tolerancePct": 1,
+      "correct": true,
+      "stdoutTail": "— `src/extract.mjs:697` (`const out = distilFile(store, f, { force })`)\n\nOne caveat: `PageIndex.indexFiles` (`src/page.mjs:116`) is the public wrapper, but it only delegates to `extract.mjs`'s `indexFiles` — it calls `distilFile` only indirectly. The deep-caller scan also surfaced `src/extract.mjs:534` (the definition line itself) and `CHANGELOG.md:326` (prose), neither of which is a real caller.\n"
+    },
+    {
+      "id": "C2",
+      "arm": "treatment",
+      "dir": "D:\\Projects\\MemAi-cotreat",
+      "session": "sess_5dc0d5b4-9463-4b63-b135-470c81b8dbf4",
+      "exit": 0,
+      "ok": true,
+      "billedInput": 864533,
+      "turns": 1,
+      "toolCalls": 13,
+      "toolErrors": 0,
+      "cliCalls": 11,
+      "memCalls": 0,
+      "valid": true,
+      "requireFewerCalls": true,
+      "tolerancePct": 1,
+      "correct": true,
+      "stdoutTail": " `filePageVersion(path, contentHash)` (which includes `EXTRACTOR_VERSION`). On reuse it reads symbol/import rows back out of the store and only refreshes `mtime`/`tokens`; otherwise it re-extracts symbols and imports, rewrites the file row and page, and returns `reused: false`. `indexFiles`/`indexCorpus` aggregate these `reused` flags into the counters exposed by the MCP hook and watch log lines.\n"
+    }
+  ]
+}
