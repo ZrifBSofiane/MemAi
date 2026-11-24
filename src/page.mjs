@@ -105,6 +105,10 @@ const commonPrefix = (a, b) => {
   return i
 }
 
+/** Symbols whose slice can stand in for a body: code declarations, not
+ *  prose headings or test names. */
+const isCodeSym = (r) => ['function', 'method', 'class', 'type', 'route', 'export'].includes(r.kind)
+
 /** Score one candidate against the body terms (0.12.0 spec): whole-name 6,
  *  segment 3, shared prefix ≥4 chars covering ≥60 % of the shorter 2, long
  *  substring 1; unmatched terms earn +1 as a signature word or a body word,
@@ -157,6 +161,13 @@ const fitWithHeader = (bodyText, budget, makeHeader) => {
   const body = clampText(bodyText, 0)
   const header = makeHeader(body)
   return { text: header, tokens: estTokens(header), truncated: true, omittedLines: body.omittedLines, header }
+}
+
+/** Last `NNN| ` line number appearing in a numbered fault slice. */
+const lastShownLine = (text) => {
+  let last = null
+  for (const m of String(text).matchAll(/^(\d+)\| /gm)) last = Number(m[1])
+  return last
 }
 
 async function noop() {}
@@ -440,7 +451,6 @@ export class MemoryPages {
       idents.add(m[0].toLowerCase())
     }
     idents.delete(best.name.toLowerCase())
-    const isCodeSym = (r) => ['function', 'method', 'class', 'type', 'route', 'export'].includes(r.kind)
     const own = (r) => r.path === best.path && r.line === best.line
     const callees = []
     const names = [...idents]
@@ -544,13 +554,62 @@ export class MemoryPages {
     let buf
     try { buf = fs.readFileSync(path.join(this.root, f.path)) } catch { return { ok: false, error: `file vanished: ${f.path}`, tokens: 0 } }
     const lines = buf.toString('utf8').split('\n')
-    const from = Math.max(0, line - 1)
-    const to = Math.min(lines.length, from + 60)
-    const code = lines.slice(from, to).map((l, i) => `${from + i + 1}| ${l}`).join('\n')
     const s = this._fileStale(f)
     const stale = s ? s.stale : null
-    const r = fitWithHeader(code, budget, (body) => `# fault ${f.path}:${line}  showing ${from + 1}-${to} of ${lines.length}  tokens=${body.tokens}/${budget}${body.truncated ? `  (truncated: ${body.omittedLines ?? '?'} more lines)` : '  (complete)'}${stale ? '  [STALE: file changed since index]' : ''}`)
-    return { ok: true, target: `${p}:${line}`, mode: 'line', path: f.path, line, lineEnd: to, stale, tokens: r.tokens, budget, truncated: r.truncated, text: r.text }
+    const staleNote = stale ? '  [STALE: file changed since index — lines approximate]' : ''
+    const lang = langOf(f.path) || 'js'
+    // Enclosing indexed symbol: innermost start <= line whose name still sits
+    // on its recorded line and whose slice covers the line. `(complete)` means
+    // the same thing in every fault mode: the slice is the whole symbol.
+    const syms = this.store.symbolsForPage(f.page_id).filter(isCodeSym).sort((a, b) => b.line - a.line)
+    let enc = null
+    let encSlice = null
+    for (const sym of syms) {
+      if (sym.line > line) continue
+      if (!String(lines[sym.line - 1] ?? '').includes(sym.name)) continue
+      const sl = sliceSymbol(lines, sym.line, lang)
+      if (line < sl.end) { enc = sym; encSlice = sl; break }
+    }
+    if (enc) {
+      const whole = lines.slice(encSlice.start, encSlice.end).join('\n')
+      const reqNote = line > enc.line ? `  (requested line ${line})` : ''
+      const rWhole = fitWithHeader(whole, budget, (b) =>
+        `# fault ${enc.name} (${enc.kind}) ${f.path}:${enc.line}-${encSlice.end}  ${encSlice.end - enc.line}L  tokens=${b.tokens}/${budget}  (complete)${staleNote}${reqNote}`)
+      if (!rWhole.truncated) {
+        return { ok: true, target: `${p}:${line}`, mode: 'line', path: f.path, line: enc.line, lineEnd: encSlice.end, symbol: enc.name, symbolKind: enc.kind, requestedLine: line, stale, tokens: rWhole.tokens, budget, truncated: false, text: rWhole.text }
+      }
+      const restText = lines.slice(line - 1, encSlice.end).map((l, i) => `${line + i}| ${l}`).join('\n')
+      const rRest = fitWithHeader(restText, budget, (b) => {
+        const shownEnd = b.truncated ? lastShownLine(b.text) ?? line : encSlice.end
+        const label = b.truncated
+          ? `(truncated: ${encSlice.end - shownEnd} more lines of ${enc.name}, which ends at ${encSlice.end})`
+          : `(rest of ${enc.name}; starts at ${enc.line})`
+        return `# fault ${f.path}:${line}  showing ${line}-${shownEnd} of ${lines.length}  tokens=${b.tokens}/${budget}  ${label}${staleNote}`
+      })
+      const shownEnd = rRest.truncated ? lastShownLine(rRest.text) ?? line : encSlice.end
+      return { ok: true, target: `${p}:${line}`, mode: 'line', path: f.path, line, lineEnd: shownEnd, symbol: enc.name, symbolKind: enc.kind, requestedLine: line, stale, tokens: rRest.tokens, budget, truncated: rRest.truncated, text: rRest.text }
+    }
+    // Not inside a symbol: the historical 60-line window.
+    const from = Math.max(0, line - 1)
+    const to = Math.min(lines.length, from + 60)
+    let contName = null
+    let contEnd = null
+    let contLine = 0
+    for (const sym of syms) {
+      if (sym.line <= from || sym.line > to) continue
+      if (!String(lines[sym.line - 1] ?? '').includes(sym.name)) continue
+      const sl = sliceSymbol(lines, sym.line, lang)
+      if (sl.end > to && sym.line > contLine) { contName = sym.name; contEnd = sl.end; contLine = sym.line }
+    }
+    const code = lines.slice(from, to).map((l, i) => `${from + i + 1}| ${l}`).join('\n')
+    const r = fitWithHeader(code, budget, (b) => {
+      const shownEnd = b.truncated ? lastShownLine(b.text) ?? (from + 1) : to
+      let label = b.truncated ? `(truncated: ${to - shownEnd} more lines of this window)` : '(window)'
+      if (!b.truncated && contName) label += `  (${contName} continues to ${contEnd})`
+      return `# fault ${f.path}:${line}  showing ${from + 1}-${shownEnd} of ${lines.length}  tokens=${b.tokens}/${budget}  ${label}${staleNote}`
+    })
+    const shownEnd = r.truncated ? lastShownLine(r.text) ?? (from + 1) : to
+    return { ok: true, target: `${p}:${line}`, mode: 'line', path: f.path, line: from + 1, lineEnd: shownEnd, requestedLine: line, stale, tokens: r.tokens, budget, truncated: r.truncated, text: r.text }
   }
 
   // ---------------------------------------------------------------- query ---
