@@ -475,6 +475,98 @@ test('query --body prefers the matching source callable over docs headings', asy
   } finally { store.close() }
 })
 
+/** Build an indexed mini-project from `{ 'src/x.js': '…', … }`; returns { root, store, pages }. */
+async function fileProject(files) {
+  const dir = tempDir()
+  cleanup.push(dir)
+  const root = path.join(dir, 'project')
+  fs.mkdirSync(root, { recursive: true })
+  fs.writeFileSync(path.join(root, 'package.json'), '{"name":"body-pick-fix","version":"1.0.0","type":"module"}')
+  for (const [rel, text] of Object.entries(files)) {
+    fs.mkdirSync(path.dirname(path.join(root, rel)), { recursive: true })
+    fs.writeFileSync(path.join(root, rel), text)
+  }
+  const store = new MemoryStore({ dbPath: path.join(root, '.memai', 'mem.db'), root })
+  store.setMeta('root', root)
+  const pages = new MemoryPages({ store, root })
+  await pages.index({ maxFiles: 100 })
+  return { root, store, pages }
+}
+
+test('query --body matches remaining terms after stopwords are dropped', async () => {
+  const { store, pages } = await fileProject({
+    'bench/fixture.js': 'export function isAppError(e) {\n  return e instanceof Error\n}\n',
+  })
+  try {
+    // `is`/`an` are stopwords; `error` still segment-matches isAppError.
+    const r = pages.query('is an error', { body: true })
+    assert.equal(r.body.ok, true)
+    assert.equal(r.body.symbol, 'isAppError')
+  } finally { store.close() }
+})
+
+test('query --body: whole-segment match beats a substring match', async () => {
+  const { store, pages } = await fileProject({
+    'src/render.js': 'export function renderMarkdown(text) {\n  return text\n}\n',
+    'src/alt.js': 'export function markdownify(text) {\n  return text\n}\n',
+  })
+  try {
+    const r = pages.query('render markdown', { body: true })
+    assert.equal(r.body.ok, true)
+    assert.equal(r.body.symbol, 'renderMarkdown', `got ${r.body.symbol}`)
+  } finally { store.close() }
+})
+
+test('query --body returns no-match when the pool is empty', async () => {
+  const { store, pages } = await fileProject({
+    'src/only.js': 'export const FETCH_TIMEOUT_MS = 30_000\n',
+  })
+  try {
+    const r = pages.query('fetch timeout', { body: true })
+    assert.equal(r.body.ok, false)
+    assert.equal(r.body.reason, 'no-match')
+    assert.match(r.text, /body: none — no source callable matches/)
+  } finally { store.close() }
+})
+
+test('query --body never guesses below the confidence floor', async () => {
+  const { store, pages } = await fileProject({
+    'src/only.js': 'export const FETCH_TIMEOUT_MS = 30_000\n\nexport function handler(req) {\n  return req\n}\n',
+  })
+  try {
+    // The only callable (`handler`) matches neither term; the const matches but is not a candidate.
+    const r = pages.query('fetch timeout', { body: true })
+    assert.equal(r.body.ok, false, `must not guess ${r.body?.symbol}`)
+    assert.equal(r.body.reason, 'no-match')
+  } finally { store.close() }
+})
+
+test('query --body: source beats support paths on a score tie', async () => {
+  const { store, pages } = await fileProject({
+    'src/budget.js': 'export function budgetFor(n) {\n  return Math.max(200, n)\n}\n',
+    'bench/fixture.js': 'export function measureBudget(n) {\n  return n\n}\n',
+  })
+  try {
+    const r = pages.query('budget', { body: true })
+    assert.equal(r.body.ok, true)
+    assert.equal(r.body.path, 'src/budget.js', `got ${r.body.path}`)
+  } finally { store.close() }
+})
+
+test('query --body: a term found only in the body can decide', async () => {
+  const { store, pages } = await fileProject({
+    'src/store.js': 'export function openStore(file) {\n  const db = new Database(file) // sqlite database handle\n  return db\n}\n',
+    'src/db.js': 'export function openStore(url) {\n  return url\n}\n',
+  })
+  try {
+    // Both candidates segment-match `open`; only src/store.js mentions sqlite in its body.
+    // The old picker tie-broke to the shorter path (src/db.js).
+    const r = pages.query('open sqlite', { body: true })
+    assert.equal(r.body.ok, true)
+    assert.equal(r.body.path, 'src/store.js', `got ${r.body.path}`)
+  } finally { store.close() }
+})
+
 test('query --body --deep and diff --faults compose in one call', async () => {
   const { store, pages } = await project()
   try {
