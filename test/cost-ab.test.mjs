@@ -104,3 +104,9 @@ test('composite task set requires fewer local CLI calls', () => {
     assert.match(t.prompt, /node bin\/memai\.mjs/)
   }
 })
+
+test('ranking task set targets the two flipped fixtures', () => {
+  assert.deepEqual(TASK_SETS.ranking.map((t) => t.id), ['R1', 'R2'])
+  assert.match(TASK_SETS.ranking[0].prompt, /benchmark naive handoff scenarios/)
+  assert.match(TASK_SETS.ranking[1].prompt, /retrieval miss statistics per tool/)
+})
