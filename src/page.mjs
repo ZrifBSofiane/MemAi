@@ -67,76 +67,9 @@ function pageScore(p, terms) {
   return Math.round(Math.max(0, s) * 1000) / 1000
 }
 
-// -------------------------------------------------------------- body pick ---
-
-const BODY_STOPWORDS = new Set(('a an the and or of in on at to for from by with without as is are was ' +
-  'were be been being do does did how what when where which who whom whose why that this these those ' +
-  'it its their there here per one two any all some no if then than so can could should would will ' +
-  'shall may might must have has had').split(' '))
-
-/** Query terms for body matching: word split, camel-case split (both forms kept),
- *  lowercased, stopwords and 1-char tokens dropped, at most 8. */
-function bodyTerms(q) {
-  const out = []
-  const seen = new Set()
-  for (const tok of String(q).split(/[^a-zA-Z0-9_$]+/)) {
-    if (!tok) continue
-    for (const part of [tok, ...tok.split(/(?<=[a-z0-9])(?=[A-Z])/)]) {
-      const t = part.toLowerCase()
-      if (t.length < 2 || BODY_STOPWORDS.has(t) || seen.has(t)) continue
-      seen.add(t)
-      out.push(t)
-      if (out.length >= 8) return out
-    }
-  }
-  return out
-}
-
-const camelSegments = (name) =>
-  String(name).split(/(?<=[a-z0-9])(?=[A-Z])|[_$]+|\d+/).map((t) => t.toLowerCase()).filter(Boolean)
-
-const SUPPORT_PATH = /(^|\/)(bench|benchmarks|fixtures|examples)\//
-const bodyTier = (p) => (isTestPath(p) ? 2 : SUPPORT_PATH.test(p) ? 1 : 0)
-
-const commonPrefix = (a, b) => {
-  let i = 0
-  const n = Math.min(a.length, b.length)
-  while (i < n && a[i] === b[i]) i++
-  return i
-}
-
 /** Symbols whose slice can stand in for a body: code declarations, not
  *  prose headings or test names. */
 const isCodeSym = (r) => ['function', 'method', 'class', 'type', 'route', 'export'].includes(r.kind)
-
-/** Score one candidate against the body terms (0.12.0 spec): whole-name 6,
- *  segment 3, shared prefix ≥4 chars covering ≥60 % of the shorter 2, long
- *  substring 1; unmatched terms earn +1 as a signature word or a body word,
- *  each bonus capped at 3. */
-function scoreBodyCandidate(c, terms, bodyWords) {
-  const lowName = String(c.name).toLowerCase().replace(/^[_$]+/, '')
-  const segs = camelSegments(c.name)
-  const sigWords = new Set(String(c.signature ?? '').toLowerCase().split(/[^a-z0-9_$]+/))
-  let score = 0
-  let sigOnly = 0
-  let bodyOnly = 0
-  for (const t of terms) {
-    let m = 0
-    if (lowName === t) m = 6
-    else if (segs.includes(t)) m = 3
-    else {
-      for (const seg of segs) {
-        const cp = commonPrefix(t, seg)
-        if (cp >= 4 && cp * 10 >= 6 * Math.min(t.length, seg.length)) { m = 2; break }
-      }
-      if (!m && t.length >= 5 && lowName.includes(t)) m = 1
-    }
-    if (m) { score += m; continue }
-    if (sigWords.has(t)) sigOnly++
-    else if (bodyWords?.has(t)) bodyOnly++
-  }
-  return score + Math.min(3, sigOnly) + Math.min(3, bodyOnly)
-}
 
 const fitWithHeader = (bodyText, budget, makeHeader) => {
   // Reserve header tokens by iterating: clamp body, build header, check total.
@@ -767,85 +700,49 @@ export class MemoryPages {
     if (!top.length) lines.push('(no hits — try a broader term or `map`)')
     if (rgNote) lines.push(`(${rgNote})`)
     const r = clampText(lines.join('\n'), budget)
+    // `--body`: locate *and* materialise the top symbol body in one call,
+    // saving a whole model turn (the dominant cost, not the page tokens).
     let bodySection = null
     let text = r.text
     let tokens = r.tokens
     if (body) {
-      // Evidence-based pick (0.12.0 spec): the body must come from the file the
-      // question is about (hit list) or match the query terms as an identifier —
-      // never a guess from an unrelated full-text page.
-      const terms = bodyTerms(q)
-      const dispRank = new Map()
-      top.forEach((h, i) => {
-        if (!h.path) return
-        const cur = dispRank.get(h.path)
-        if (cur === undefined || i < cur) dispRank.set(h.path, i)
-      })
-      const pool = []
-      const poolKeys = new Set()
-      const addCandidate = (s, rank) => {
-        if (!s?.path || !['function', 'method', 'class'].includes(s.kind)) return
-        if (isDocPath(s.path)) return
-        const key = `${s.path}|${s.name}|${s.line}`
-        if (poolKeys.has(key)) {
-          const c = pool.find((x) => x.key === key)
-          if (rank < c.fileRank) c.fileRank = rank
-          return
+      // Prefer a callable body, searched over the symbol pool (not just the
+      // displayed hits): the top hit is often a const, and the function that
+      // answers "how does X work" can rank below the visible page. Docs and
+      // tests are fallbacks: a README heading must not win over source code.
+      const terms = String(q).toLowerCase().split(/[^a-z0-9_$]+/i).filter((t) => t.length >= 2)
+      const all = this.store.symbolSearch(q, { limit: 40 })
+      const callables = all.filter((s) => ['function', 'method', 'class'].includes(s.kind))
+      // A natural-language question can rank 40 docs symbols ahead of the
+      // source function that answers it. Add the callables of the top source
+      // pages so the right file's functions are in the pool even when their
+      // names do not match the query terms.
+      for (const p of this.store.searchPages(q, { limit: 40 })) {
+        if (!p.pageId.startsWith('file:') || !p.path || isTestPath(p.path) || isDocPath(p.path)) continue
+        for (const s of this.store.symbolsForPage(p.pageId)) {
+          if (!['function', 'method', 'class'].includes(s.kind)) continue
+          if (callables.some((c) => c.path === p.path && c.name === s.name)) continue
+          callables.push({ ...s, path: p.path })
         }
-        poolKeys.add(key)
-        pool.push({ key, name: s.name, kind: s.kind, path: s.path, line: s.line, signature: s.signature, tier: bodyTier(s.path), fileRank: dispRank.get(s.path) ?? rank, score: 0 })
+        if (callables.length > 120) break
       }
-      // 1) callables shown in the hit list
-      for (const h of top) {
-        if (h.kind !== 'symbol') continue
-        addCandidate({ name: h.symbol, kind: h.symbolKind, path: h.path, line: h.line, signature: h.snippet }, Infinity)
-      }
-      // 2) identifier search
-      for (const s of this.store.symbolSearch(q, { limit: 40 })) addCandidate(s, Infinity)
-      // 3) callables of the full-text page hits (rank = their page position)
-      const pageHits = this.store.searchPages(q, { limit: 40 })
-      for (let i = 0; i < pageHits.length; i++) {
-        const p = pageHits[i]
-        if (!p.pageId.startsWith('file:') || !p.path) continue
-        for (const s of this.store.symbolsForPage(p.pageId)) addCandidate(s, i)
-      }
-      if (pool.length > 120) pool.length = 120
-      // Body-only evidence: the 3 best-ranked files, at most 40 candidates.
-      const byRank = pool.slice().sort((a, b) => a.fileRank - b.fileRank || a.path.localeCompare(b.path) || a.line - b.line)
-      const bodyFiles = []
-      for (const c of byRank) {
-        if (!bodyFiles.includes(c.path)) bodyFiles.push(c.path)
-        if (bodyFiles.length === 3) break
-      }
-      const bodyFileSet = new Set(bodyFiles)
-      let bodyBudget = 40
-      const linesByPath = new Map()
-      const wordsBySym = new Map()
-      const bodyWordsFor = (c) => {
-        if (!bodyFileSet.has(c.path) || bodyBudget <= 0) return null
-        if (wordsBySym.has(c.key)) return wordsBySym.get(c.key)
-        bodyBudget--
-        let fileLines = linesByPath.get(c.path)
-        if (fileLines === undefined) {
-          try { fileLines = fs.readFileSync(path.join(this.root, c.path)).toString('utf8').split('\n') } catch { fileLines = null }
-          linesByPath.set(c.path, fileLines)
+      const source = callables.filter((s) => !isTestPath(s.path) && !isDocPath(s.path))
+      const preferred = new Set(top.filter((h) => h.kind === 'page' && h.path).map((h) => h.path))
+      const score = (s) => {
+        const name = String(s.name).toLowerCase()
+        const sig = String(s.signature ?? '').toLowerCase()
+        let n = preferred.has(s.path) ? 5 : 0
+        for (const t of terms) {
+          if (name.includes(t)) n += 3
+          else if (sig.includes(t)) n += 1
         }
-        let words = null
-        if (fileLines) {
-          const sl = sliceSymbol(fileLines, c.line, langOf(c.path) || 'js')
-          words = new Set(fileLines.slice(sl.start, sl.end).join('\n').toLowerCase().split(/[^a-z0-9_$]+/))
-        }
-        wordsBySym.set(c.key, words)
-        return words
+        return n
       }
-      for (const c of pool) c.score = scoreBodyCandidate(c, terms, bodyWordsFor(c))
-      pool.sort((a, b) => b.score - a.score || a.tier - b.tier || a.fileRank - b.fileRank || a.path.length - b.path.length || a.path.localeCompare(b.path) || a.line - b.line)
+      const pool = (source.length ? source : callables.length ? callables : all).slice()
+        .sort((a, b) => score(b) - score(a) || a.path.localeCompare(b.path) || a.line - b.line)
       const chosen = pool[0]
-      if (!chosen || chosen.score < 2) {
-        const noneText = 'body: none — no source callable matches; fault the hit you need'
-        bodySection = { ok: false, reason: 'no-match', target: null, tokens: estTokens(noneText), text: noneText }
-        text += `\n\n${noneText}`
-        tokens += bodySection.tokens
+      if (!chosen) {
+        bodySection = { ok: false, error: 'no symbol hit; use get file:<path> for signatures' }
       } else {
         const f = this.fault(`${chosen.path}#${chosen.name}`, { budget: DEFAULTS.fault, deep })
         bodySection = f.ok
