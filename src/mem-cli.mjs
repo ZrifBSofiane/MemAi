@@ -11,7 +11,7 @@ import { MemoryStore } from './store.mjs'
 import { MemoryPages, DEFAULTS } from './page.mjs'
 import { estTokens } from './tokens.mjs'
 
-export const VERSION = '0.11.0'
+export const VERSION = '0.12.0'
 
 const HELP = `MemAi CLI  (tokens are the currency; every response has a token count)
 

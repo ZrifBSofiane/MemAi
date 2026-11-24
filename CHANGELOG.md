@@ -4,6 +4,37 @@ All notable changes to this project are documented here. The format is loosely
 based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the
 project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.12.0] — 2026-11-24
+
+### Fixed
+
+- **`fault <path>:<line>` now returns the enclosing indexed symbol.** The old
+  fixed 60-line window printed `(complete)` mid-function (e.g. a 60-line window
+  of a 119-line method claimed completeness). `(complete)` now means the same
+  thing in every fault mode — the whole symbol: `(rest of …)` / `(truncated:
+  …)` label slices inside an oversized symbol, `(window)` marks slices outside
+  symbols (with a `(continues to …)` note), and a stale index degrades to a
+  window rather than a wrong claim.
+- **Cap-limited slices never claim `(complete)`.** A symbol over the 220-line
+  slice cap is labelled `(head of <symbol>; slice capped at 220 lines — the
+  symbol's end was not verified)` in both fault modes, instead of presenting a
+  capped prefix as complete.
+- Skill wording matches the new replies ("the symbol containing that line, or a
+  window outside symbols"). `memai eval` recall/MRR are unchanged (shipped
+  100 %, MRR 0.80/0.74; extended 85/90 %) — re-verified on the release tree.
+
+### Measured
+
+- Live composite A/B (2 tasks, headless sessions, both arms on an identical
+  corpus): no task above the +1 % tolerance and none with more calls
+  (`bench/cost-ab-2026-11-24-composite.*`). No-regression gate only — no token
+  saving is claimed for this release.
+- A `query --body` evidence picker was built in this round, measured
+  (body-from-expected-file 23 → 28/40 extended, 8 → 11/12 shipped, 0
+  right→wrong) and **discarded**: it missed its ≥ 34/40 gate, and the record —
+  including the residual miss catalogue — is kept in
+  `bench/NEGATIVE-body-pick.md`.
+
 ## [0.11.0] — 2026-11-24
 
 ### Fixed
