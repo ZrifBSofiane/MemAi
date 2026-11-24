@@ -148,6 +148,29 @@ test('eval: fixtures produce recall/MRR per mode and list misses', async () => {
   } finally { store.close() }
 })
 
+test('eval: body metric counts bodies from the expected file', async () => {
+  const dir = tempDir()
+  cleanup.push(dir)
+  const root = path.join(dir, 'project')
+  fs.mkdirSync(root, { recursive: true })
+  makeCorpus(root)
+  const store = new MemoryStore({ dbPath: path.join(root, '.memai', 'mem.db'), root })
+  store.setMeta('root', root)
+  const pages = new MemoryPages({ store, root })
+  await pages.index({ maxFiles: 500 })
+  try {
+    const r = pages.evaluate([
+      { q: 'verifyToken', expect: 'src/auth.js' },
+      { q: 'totally unrelated xyzzy', expect: 'src/auth.js' },
+    ], { modes: ['index'] })
+    assert.ok(r.ok)
+    assert.equal(r.results.body.total, 2)
+    assert.equal(r.results.body.hits, 1)
+    assert.match(r.text, /body: file=50%  \(1\/2\)/)
+    assert.match(r.text, /body-miss: "totally unrelated xyzzy" → expected src\/auth\.js, got none/)
+  } finally { store.close() }
+})
+
 test('status reports freshness; it follows disk edits and --no-stale', async () => {
   const { root, store, pages } = await project({ 'src/one.js': 'export const one = 1\n' })
   try {
