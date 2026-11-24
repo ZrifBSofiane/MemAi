@@ -986,27 +986,10 @@ export class MemoryPages {
       }
       results[mode] = { recallAtK: hits / fixtures.length, mrr: mrrSum / fixtures.length, hits, total: fixtures.length, rows }
     }
-    // Body metric (0.12.0): does `--body` pick a body from the expected file?
-    let bodyHits = 0
-    const bodyRows = []
-    for (const fx of fixtures) {
-      const r = this.query(String(fx.q), { k, body: true })
-      const expect = norm(fx.expect)
-      const got = r.body?.ok ? norm(r.body.path) : 'none'
-      const hit = got !== 'none' && (got === expect || got.endsWith('/' + expect))
-      if (hit) bodyHits++
-      bodyRows.push({ q: String(fx.q), expect, hit, got })
-    }
-    results.body = { recallAtK: bodyHits / fixtures.length, hits: bodyHits, total: fixtures.length, rows: bodyRows }
     const lines = [`# eval — ${fixtures.length} fixtures, k=${k}`]
-    for (const mode of modes) {
-      const r = results[mode]
-      lines.push(`${mode}: recall@${k}=${Math.round(r.recallAtK * 100)}%  mrr=${r.mrr.toFixed(2)}  (${r.hits}/${r.total})`)
-    }
-    lines.push(`body: file=${Math.round(results.body.recallAtK * 100)}%  (${bodyHits}/${fixtures.length})`)
-    const first = results[modes[0]]
+    for (const [mode, r] of Object.entries(results)) lines.push(`${mode}: recall@${k}=${Math.round(r.recallAtK * 100)}%  mrr=${r.mrr.toFixed(2)}  (${r.hits}/${r.total})`)
+    const first = results[Object.keys(results)[0]]
     for (const row of first?.rows ?? []) if (!row.hit) lines.push(`miss: "${row.q}" → expected ${row.expect}`)
-    for (const row of bodyRows) if (!row.hit) lines.push(`body-miss: "${row.q}" → expected ${row.expect}, got ${row.got}`)
     const text = lines.join('\n')
     return { ok: true, k, results, tokens: estTokens(text), text }
   }
