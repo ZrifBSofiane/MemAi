@@ -4,7 +4,7 @@ description: Use MemAi's paged memory in a repository with a .memai store instea
 license: MIT
 compatibility: Requires a project with a MemAi store (`memai init`, Node >= 22.13) and either the `mem` MCP tool or the `memai` CLI on PATH. Local-only; no network. Works in Agent Skills clients including Claude Code, OpenCode, Codex, ZCode, DSH and generic SKILL.md hosts.
 metadata:
-  version: "0.10.0"
+  version: "0.11.0"
   docs: https://github.com/ZrifBSofiane/MemAi
   pager: .memai/mem.db
 ---
@@ -18,11 +18,16 @@ the alternative is reading whole files into context.
 ## Use MemAi when
 
 - You are starting work in this repository and need orientation: stack, commands, entrypoints,
-  conventions. One `card` call (~200 tokens) covers it.
+  conventions. One `card` call (~270 tokens) covers it.
 - You know what you are looking for but not where it is: `query` finds symbols and paths.
-- You need one function, method or line range: `fault` returns just that slice.
+- You need one function, method or line range: `fault` returns just that slice — complete up to
+  1,200 tokens and labelled `(complete)` or `(truncated: N more lines)`.
+- You need a body plus its callers/callees in one call: `{"op":"query","q":"...","body":true,
+  "deep":true}` (CLI `memai query "..." --body --deep`) locates the symbol and returns the body
+  with one-hop context.
 - You want a file's surface without its body: `get file:<path>` returns signatures.
-- You are resuming after edits or in a new session: `diff --since <version>` lists what changed.
+- You are resuming after edits or in a new session: `diff --since <version>` lists what changed;
+  add `"faults":"<sym>"` (CLI `--faults`) to include the named slices in the same reply.
   At session end run `checkpoint` (CLI) so the next session can use `diff --last` — no hash hunting.
 - You need dependency answers ("what breaks if this changes", "who uses this module"): use
   `{"op":"graph","target":"<path|symbol>","depth":2}` (CLI `memai graph`) — importers, imports,
@@ -56,15 +61,18 @@ the alternative is reading whole files into context.
 2. **Locate.** `{"op":"query","q":"verify token"}` (CLI: `memai query "verify token"`) returns
    ranked pages and symbols with snippets. Do not read content with `query`; it is a finder.
    Add `"body": true` (CLI `--body`) to get the top symbol's body in the same call — one model
-   turn instead of query + fault. Comma-separated targets batch too: `fault a,b,c`,
+   turn instead of query + fault. Add `"deep": true` (CLI `--deep`) to include one-hop
+   callers/callees with that body. Comma-separated targets batch too: `fault a,b,c`,
    `get file:a.js,file:b.js`.
 3. **Page.** Fetch one slice:
-   - `{"op":"fault","target":"verifyToken"}` — one symbol body.
+   - `{"op":"fault","target":"verifyToken"}` — one symbol body (default budget 1,200).
    - `{"op":"fault","target":"src/auth.js:120"}` — one line range.
    - `{"op":"get","pageId":"file:src/auth.js"}` — signatures for a whole file.
    CLI equivalents: `memai fault verifyToken`, `memai get file:src/auth.js`.
+   A slice marked `(complete)` is the whole symbol; answer from it and do not read the file.
 4. **Resume.** With a version hash from the last session: `{"op":"diff","since":"<version>"}`
-   (CLI `memai diff --since <version>`). Re-index locally after edits with `{"op":"index"}` or
+   (CLI `memai diff --since <version>`). Add `"faults":"sym1,sym2"` (CLI `--faults`) to append
+   those slices to the delta. Re-index locally after edits with `{"op":"index"}` or
    `memai index` (no model tokens).
 5. **Share.** `{"op":"note","topic":"handoff","content":"auth move: see file:src/auth.js"}`,
    `{"op":"post",...}`, `{"op":"inbox","agent":"<id>"}`; CLI `memai note/post/inbox`.
@@ -75,7 +83,7 @@ not, use the tool. Do not mix two stores.
 ## Budget discipline
 
 - Every reply starts with a token count and is clamped to a budget.
-- Defaults are tuned: card 700, map 3500, get 1200, fault 600, query 400, diff 600, inbox 900, graph 500, affected 500, pack 1500.
+- Defaults are tuned: card 700, map 3500, get 1200, fault 1200, query 400, diff 600, inbox 900, graph 500, affected 500, pack 1500. Fault replies label `(complete)` or `(truncated: N more lines)`.
 - Lower a budget (`"budget": 300`, `--budget 300`) for a cheap peek; raise it only when the
   previous page was truncated and the rest is genuinely needed.
 - Prefer one larger `fault` over many tiny `query` calls. Stop when the question is answered.

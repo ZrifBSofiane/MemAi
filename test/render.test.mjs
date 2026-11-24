@@ -66,3 +66,20 @@ test('fault returns a complete large body by default and marks it', async () => 
     assert.match(small.text, /\(truncated: \d+ more lines?\)/)
   } finally { store.close() }
 })
+
+test('docs filename matches cannot outrank a source page', async () => {
+  const { root, store, pages } = await fixture()
+  try {
+    fs.mkdirSync(path.join(root, 'docs'), { recursive: true })
+    fs.writeFileSync(path.join(root, 'docs', 'token-savings.md'), '# Token savings\n\ntoken savings measured here\n')
+    fs.writeFileSync(path.join(root, 'src', 'tokenizer.js'), 'export function tokenize(input) {\n  return input.split(/\\s+/)\n}\n')
+    await pages.index({ maxFiles: 100 })
+    const r = pages.query('token savings', { k: 5 })
+    const src = r.hits.find((h) => h.path === 'src/tokenizer.js')
+    const doc = r.hits.find((h) => h.path === 'docs/token-savings.md')
+    assert.ok(src, `source page missing: ${r.text}`)
+    assert.ok(doc, `docs page missing: ${r.text}`)
+    assert.ok(src.score > doc.score, `source ${src.score} must outrank docs ${doc.score}`)
+    assert.ok(doc.score <= 0.8, `docs pathBoost must be capped, got ${doc.score}`)
+  } finally { store.close() }
+})

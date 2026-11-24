@@ -1,11 +1,11 @@
 {
   "surfaces": {
-    "schema": 1061,
+    "schema": 1058,
     "instructions": 208,
-    "initBlock": 518,
+    "initBlock": 590,
     "skillFrontmatter": 222,
     "card": 287,
-    "total": 2296
+    "total": 2365
   },
   "delivered": [
     {

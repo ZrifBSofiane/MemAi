@@ -57,9 +57,13 @@ function pathBoost(p, terms) {
  *  base sits below precise symbol hits; docs and tests are context, not the
  *  implementation, and rank below code. */
 function pageScore(p, terms) {
+  const isTest = /(^|\/)(test|tests)\/|\.test\.|\.spec\./i.test(p)
+  const isDoc = /\.(md|markdown)$/i.test(p) || /(^|\/)(docs?|README|PROTOCOL|CHANGELOG)/i.test(p)
   let s = 0.6 + pathBoost(p, terms)
-  if (/(^|\/)(test|tests)\/|\.test\.|\.spec\./i.test(p)) s -= 0.3
-  else if (/\.(md|markdown)$/i.test(p) || /(^|\/)(docs?|README|PROTOCOL|CHANGELOG)/i.test(p)) s -= 0.2
+  if (isTest) s -= 0.3
+  // Docs are context, not the implementation. A filename match can give them a
+  // +3 pathBoost, which drowned every code page for token/doc queries; cap it.
+  else if (isDoc) s = 0.4 + pathBoost(p, terms) * 0.1
   return Math.round(Math.max(0, s) * 1000) / 1000
 }
 
@@ -600,7 +604,12 @@ export class MemoryPages {
         seenLines.add(key)
         // Append directly — `push` dedupes on pageId|symbol, which would
         // collapse multiple matched lines from the same file into one.
-        hits.push({ ...h, score: Math.round((h.score + pathBoost(h.path, terms)) * 1000) / 1000 })
+        const boost = pathBoost(h.path, terms)
+        const docLike = /\.(md|markdown)$/i.test(h.path) || /(^|\/)(docs?|README|PROTOCOL|CHANGELOG)/i.test(h.path)
+        const testLike = /(^|\/)(test|tests)\/|\.test\.|\.spec\./i.test(h.path)
+        const base = h.score + boost
+        const score = testLike ? base * 0.5 : docLike ? 0.4 + boost * 0.1 : base
+        hits.push({ ...h, score: Math.round(score * 1000) / 1000 })
       }
     }
     // One ranked pool with deterministic tie-breaks (score, shorter path, path,
