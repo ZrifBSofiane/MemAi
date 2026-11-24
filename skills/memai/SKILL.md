@@ -66,7 +66,7 @@ the alternative is reading whole files into context.
    `get file:a.js,file:b.js`.
 3. **Page.** Fetch one slice:
    - `{"op":"fault","target":"verifyToken"}` — one symbol body (default budget 1,200).
-   - `{"op":"fault","target":"src/auth.js:120"}` — one line range.
+   - `{"op":"fault","target":"src/auth.js:120"}` — the symbol containing that line, or a window outside symbols.
    - `{"op":"get","pageId":"file:src/auth.js"}` — signatures for a whole file.
    CLI equivalents: `memai fault verifyToken`, `memai get file:src/auth.js`.
    A slice marked `(complete)` is the whole symbol; answer from it and do not read the file.
