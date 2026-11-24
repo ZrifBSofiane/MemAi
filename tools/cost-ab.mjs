@@ -80,6 +80,24 @@ export const TASK_SETS = {
       prompt: 'Use exactly one local CLI call: `node bin/memai.mjs fault "src/page.mjs#query" --text`. Explain how `--body` chooses a symbol.',
     },
   ],
+  composite: [
+    {
+      id: 'C1',
+      requireCli: true,
+      requireFewerCalls: true,
+      tolerancePct: 1,
+      expect: /indexCorpus|indexFiles/,
+      prompt: 'Find the functions that call the function that decides to reuse unchanged files during indexing. Use the local CLI (`node bin/memai.mjs`); do not use grep or the MCP tool. Answer with the caller names.',
+    },
+    {
+      id: 'C2',
+      requireCli: true,
+      requireFewerCalls: true,
+      tolerancePct: 1,
+      expect: /distilFile|no changes|empty/i,
+      prompt: 'Use the card version and show what changed since it, including the body of the function that decides to reuse unchanged files. Use the local CLI (`node bin/memai.mjs`); do not use grep or the MCP tool.',
+    },
+  ],
 }
 
 export function gate(rows) {

@@ -228,7 +228,7 @@ export class MemoryPages {
    * Tiny textual delta between the current project version and `since`.
    * Returns changed/added/removed pages with per-file symbol churn, never bodies.
    */
-  diff({ since = null, budget = DEFAULTS.diff, last = false, agent = 'anon' } = {}) {
+  diff({ since = null, budget = DEFAULTS.diff, last = false, agent = 'anon', faults = [] } = {}) {
     if (!since && last) {
       since = this.store.getMeta(`checkpoint:${agent}`) ?? null
       if (!since) return { ok: false, error: `no checkpoint for agent "${agent}" — run \`memai checkpoint [--agent ${agent}]\` at the end of a session`, tokens: 0 }
@@ -291,10 +291,22 @@ export class MemoryPages {
     if (!added.length && !changed.length && !removed.length) lines.push('(no changes)')
     lines.push('# next: get file:<path> for signatures | fault <symbol> for a body slice')
     const r = clampText(lines.join('\n'), budget)
+    const targets = (Array.isArray(faults) ? faults : String(faults ?? '').split(','))
+      .map((s) => String(s).trim()).filter(Boolean)
+    let text = r.text
+    let tokens = r.tokens
+    if (targets.length) {
+      const slices = targets.map((t) => {
+        const f = this.fault(t, { budget: DEFAULTS.fault })
+        return f.ok ? f.text : `# fault ${t} error: ${f.error}`
+      })
+      text += `\n\n# slices\n${slices.join('\n\n')}`
+      tokens = estTokens(text)
+    }
     return {
       ok: true, from: old.version_hash, to: cur.version_hash,
       added: added.map(byPath), changed: changed.map((e) => ({ path: byPath(e), tokens: e.tokens, symbolsAdded: e.symbolsAdded || [], symbolsRemoved: e.symbolsRemoved || [] })),
-      removed: removed.map(byPath), aggregate, tokens: r.tokens, truncated: r.truncated, text: r.text, budget,
+      removed: removed.map(byPath), aggregate, tokens, truncated: r.truncated, text, budget,
     }
   }
 
@@ -379,10 +391,21 @@ export class MemoryPages {
     // Body-level call sites (dynamic imports, method-body calls) never appear
     // in declaration signatures — a ripgrep sweep fills the remaining slots.
     if (callers.length < 5 && this.staleCheck !== false) {
+      const ownStart = best.line
+      const ownEnd = best.line + code.split('\n').length - 1
       const extra = this._rgSearch(best.name, { cap: 5 - callers.length })
       for (const h of extra.hits) {
-        if (h.path === best.path || callers.some((c) => c.path === h.path && c.line === h.line)) continue
-        callers.push({ name: null, kind: 'call-site', path: h.path, line: h.line, signature: h.snippet.slice(0, 120) })
+        // Skip only call sites inside this very slice; same-file callers
+        // elsewhere in the file are real callers.
+        if (h.path === best.path && h.line >= ownStart && h.line <= ownEnd) continue
+        const syms = this.store.symbolsForPage(`file:${h.path}`)
+          .filter(isCodeSym).sort((a, b) => a.line - b.line)
+        const enclosing = [...syms].reverse().find((s) => s.line <= h.line)
+        const line = enclosing?.line ?? h.line
+        if (callers.some((c) => c.path === h.path && c.line === line)) continue
+        callers.push(enclosing
+          ? { name: enclosing.name, kind: enclosing.kind, path: h.path, line: enclosing.line, signature: enclosing.signature }
+          : { name: null, kind: 'call-site', path: h.path, line: h.line, signature: h.snippet.slice(0, 120) })
         if (callers.length >= 5) break
       }
     }
@@ -540,7 +563,7 @@ export class MemoryPages {
   /** Ranked, compact hits: IDF-weighted symbols, FTS pages and (with `--rg`)
    *  body lines all compete in one score-sorted pool, so rare-term evidence can
    *  surface a file the index alone buried. */
-  query(q, { k = 5, budget = DEFAULTS.query, kind = null, rg = false, body = false } = {}) {
+  query(q, { k = 5, budget = DEFAULTS.query, kind = null, rg = false, body = false, deep = false } = {}) {
     const terms = String(q).toLowerCase().split(/[^a-z0-9_$]+/i).filter((t) => t.length >= 2).slice(0, 6)
     const hits = []
     const seen = new Set()
@@ -642,7 +665,7 @@ export class MemoryPages {
       if (!chosen) {
         bodySection = { ok: false, error: 'no symbol hit; use get file:<path> for signatures' }
       } else {
-        const f = this.fault(`${chosen.path}#${chosen.name}`, { budget: DEFAULTS.fault })
+        const f = this.fault(`${chosen.path}#${chosen.name}`, { budget: DEFAULTS.fault, deep })
         bodySection = f.ok
           ? { ok: true, target: chosen.name, symbol: chosen.name, path: f.path ?? chosen.path, tokens: f.tokens, text: f.text }
           : { ok: false, target: chosen.name, error: f.error }
