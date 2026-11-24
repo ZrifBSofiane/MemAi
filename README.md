@@ -112,6 +112,11 @@ Across **six questions** spanning task types:
   **100%**, MRR **0.80** (index) / **0.74** (hybrid). A 40-fixture development
   matrix (`bench/eval-fixtures-ext.json`, not the public baseline) scores 85% /
   90% and is what the 0.11.0 ranking fixes are validated against.
+- Honest fault labels (0.12.0): `fault <path>:<line>` returns the enclosing
+  indexed symbol — `(complete)` only when the whole symbol is shown,
+  `(rest of …)` / `(truncated: …)` when it is larger than the budget, `(window)`
+  outside symbols, and slices over the 220-line cap say their end was not
+  verified instead of claiming completeness.
 - Where graphify genuinely wins: architecture-wide discovery (community
   detection, god nodes), mixed corpora (papers, images, video), cross-repo
   merged graphs, and human-facing HTML/GraphRAG exports. MemAi does none of

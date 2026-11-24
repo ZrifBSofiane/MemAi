@@ -1,0 +1,92 @@
+{
+  "date": "2026-11-24",
+  "set": "composite",
+  "dirs": {
+    "baseline": "D:\\Projects\\MemAi-120base",
+    "treatment": "D:\\Projects\\MemAi-120treat"
+  },
+  "verdict": {
+    "ok": true,
+    "failures": [],
+    "baseTotal": 1655254,
+    "treatTotal": 751118
+  },
+  "rows": [
+    {
+      "id": "C1",
+      "arm": "baseline",
+      "dir": "D:\\Projects\\MemAi-120base",
+      "session": "sess_b81cbe51-1ae2-4ad6-9125-dee84f32c906",
+      "exit": 0,
+      "ok": true,
+      "billedInput": 1087402,
+      "turns": 1,
+      "toolCalls": 12,
+      "toolErrors": 0,
+      "cliCalls": 11,
+      "memCalls": 0,
+      "valid": true,
+      "requireFewerCalls": true,
+      "tolerancePct": 1,
+      "correct": true,
+      "stdoutTail": "reused: true, ... }`.\n\nCallers of `distilFile`:\n\n- **`indexFiles`** — `src/extract.mjs:681`\n- **`indexCorpus`** — `src/extract.mjs:713`\n\nThese are the only two call sites in the repository (verified with `node bin/memai.mjs query \"distilFile(\" --rg`; everything else — `src/watch.mjs`, `mcp/hook.mjs`, `mcp/tools.mjs` — goes through `indexFiles`/`indexCorpus` and merely reads the `reused` counter).\n"
+    },
+    {
+      "id": "C2",
+      "arm": "baseline",
+      "dir": "D:\\Projects\\MemAi-120base",
+      "session": "sess_1ace41d1-13ae-4e82-b77f-2cca7286bc37",
+      "exit": 0,
+      "ok": true,
+      "billedInput": 567852,
+      "turns": 1,
+      "toolCalls": 10,
+      "toolErrors": 0,
+      "cliCalls": 8,
+      "memCalls": 0,
+      "valid": true,
+      "requireFewerCalls": true,
+      "tolerancePct": 1,
+      "correct": true,
+      "stdoutTail": "h, lang, bytes: f.bytes, loc, contentHash, tokens,\n      symbols, imports,\n      looksEsm: /\\bimport\\s|\\bexport\\s/.test(text), looksCjs: /\\brequire\\s*\\(|module\\.exports/.test(text),\n    },\n  }\n}\n```\n\nOn a hit it reuses the stored symbol/import rows (refreshing mtime/tokens only if they drifted); on a miss it re-extracts and rewrites the file rows, symbol/import tables, and the rendered file page.\n"
+    },
+    {
+      "id": "C1",
+      "arm": "treatment",
+      "dir": "D:\\Projects\\MemAi-120treat",
+      "session": "sess_2120a8b2-d237-404f-aa8e-f6b368a27563",
+      "exit": 0,
+      "ok": true,
+      "billedInput": 367694,
+      "turns": 1,
+      "toolCalls": 4,
+      "toolErrors": 0,
+      "cliCalls": 4,
+      "memCalls": 0,
+      "valid": true,
+      "requireFewerCalls": true,
+      "tolerancePct": 1,
+      "correct": true,
+      "stdoutTail": "ct.mjs:534`) — its `reused: true` branch fires when the content hash and page version are unchanged.\n\nThe functions that call it:\n\n- **`indexFiles`** — one call site at `src/extract.mjs:681`\n- **`indexCorpus`** — one call site at `src/extract.mjs:713`\n\nBoth are in `src/extract.mjs`; the `--rg` union pass found no other call sites (the only other hits are the CHANGELOG mention and a code comment).\n"
+    },
+    {
+      "id": "C2",
+      "arm": "treatment",
+      "dir": "D:\\Projects\\MemAi-120treat",
+      "session": "sess_74937d90-870f-479a-bb8c-ff06c16dd6bd",
+      "exit": 0,
+      "ok": true,
+      "billedInput": 383424,
+      "turns": 1,
+      "toolCalls": 7,
+      "toolErrors": 0,
+      "cliCalls": 6,
+      "memCalls": 0,
+      "valid": true,
+      "requireFewerCalls": true,
+      "tolerancePct": 1,
+      "correct": true,
+      "stdoutTail": "\\s*\\(|module\\.exports/.test(text),\n    },\n  }\n}\n```\n\nTwo details worth noting: the reuse path still refreshes `mtime`/`tokens` on the file row (so a checkout touching mtimes doesn't keep files flagged stale), and the page version is a pure function of extractor version + path + content hash — so a `[STALE]` page can only arise from content changes or an `EXTRACTOR_VERSION` bump, never from mtime.\n"
+    }
+  ]
+}

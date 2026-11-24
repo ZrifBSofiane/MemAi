@@ -4,7 +4,7 @@ description: Use MemAi's paged memory in a repository with a .memai store instea
 license: MIT
 compatibility: Requires a project with a MemAi store (`memai init`, Node >= 22.13) and either the `mem` MCP tool or the `memai` CLI on PATH. Local-only; no network. Works in Agent Skills clients including Claude Code, OpenCode, Codex, ZCode, DSH and generic SKILL.md hosts.
 metadata:
-  version: "0.11.0"
+  version: "0.12.0"
   docs: https://github.com/ZrifBSofiane/MemAi
   pager: .memai/mem.db
 ---
@@ -66,7 +66,7 @@ the alternative is reading whole files into context.
    `get file:a.js,file:b.js`.
 3. **Page.** Fetch one slice:
    - `{"op":"fault","target":"verifyToken"}` — one symbol body (default budget 1,200).
-   - `{"op":"fault","target":"src/auth.js:120"}` — one line range.
+   - `{"op":"fault","target":"src/auth.js:120"}` — the symbol containing that line, or a window outside symbols.
    - `{"op":"get","pageId":"file:src/auth.js"}` — signatures for a whole file.
    CLI equivalents: `memai fault verifyToken`, `memai get file:src/auth.js`.
    A slice marked `(complete)` is the whole symbol; answer from it and do not read the file.

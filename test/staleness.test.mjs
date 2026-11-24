@@ -127,16 +127,151 @@ test('fault symbol reply carries lineEnd + stale; header range is structured', a
   } finally { store.close() }
 })
 
-test('fault path:line reply carries lineEnd and staleness', async () => {
+test('fault path:line returns the enclosing symbol', async () => {
   const { root, store, pages } = await indexedProject()
   try {
+    // auth.js lines: 4-7 verifyToken, so :4 is the symbol's first line.
     const f = pages.fault('src/auth.js:4')
     assert.ok(f.ok, f.error)
     assert.equal(f.mode, 'line')
-    const total = fs.readFileSync(path.join(root, 'src', 'auth.js'), 'utf8').split('\n').length
-    assert.equal(f.lineEnd, Math.min(total, f.line - 1 + 60))
-    assert.ok(f.lineEnd >= f.line)
+    assert.equal(f.symbol, 'verifyToken')
+    assert.equal(f.line, 4)
+    assert.equal(f.lineEnd, 7)
+    assert.equal(f.truncated, false)
+    assert.equal(f.requestedLine, 4)
+    assert.match(f.text, /\(complete\)/)
+    assert.ok(!f.text.includes('(window)'))
     assert.equal(f.stale, false)
+  } finally { store.close() }
+})
+
+test('fault path:line mid-symbol still returns the whole symbol', async () => {
+  const { store, pages } = await indexedProject()
+  try {
+    const f = pages.fault('src/auth.js:6')
+    assert.ok(f.ok, f.error)
+    assert.equal(f.symbol, 'verifyToken')
+    assert.equal(f.line, 4)
+    assert.equal(f.lineEnd, 7)
+    assert.match(f.text, /\(complete\)/)
+    assert.match(f.text, /\(requested line 6\)/)
+    assert.match(f.text, /token\.split/)
+  } finally { store.close() }
+})
+
+test('fault path:line on an oversized symbol labels the rest and the truncation', async () => {
+  const dir = tempDir()
+  cleanup.push(dir)
+  const root = path.join(dir, 'project')
+  fs.mkdirSync(root, { recursive: true })
+  fs.writeFileSync(path.join(root, 'package.json'), '{"name":"line-big","version":"1.0.0","type":"module"}')
+  fs.mkdirSync(path.join(root, 'src'), { recursive: true })
+  const big = ['// big fixture', 'export function bigThing(input) {']
+  for (let i = 0; i < 38; i++) big.push(`  const step${i} = input + ${i}`)
+  big.push('  return step0', '}', '')
+  fs.writeFileSync(path.join(root, 'src', 'big.js'), big.join('\n'))
+  const store = new MemoryStore({ dbPath: path.join(root, '.memai', 'mem.db'), root })
+  store.setMeta('root', root)
+  const pages = new MemoryPages({ store, root })
+  await pages.index({ maxFiles: 100 })
+  try {
+    // bigThing spans lines 2-42 (~290 tokens): the whole never fits 150.
+    const rest = pages.fault('src/big.js:30', { budget: 150 })
+    assert.ok(rest.ok, rest.error)
+    assert.equal(rest.symbol, 'bigThing')
+    assert.equal(rest.line, 30)
+    assert.equal(rest.lineEnd, 42)
+    assert.match(rest.text, /\(rest of bigThing; starts at 2\)/)
+    assert.ok(!rest.text.includes('(complete)'))
+
+    const cut = pages.fault('src/big.js:2', { budget: 150 })
+    assert.ok(cut.ok, cut.error)
+    assert.match(cut.text, /\(truncated: \d+ more lines of bigThing, which ends at 42\)/)
+    assert.ok(cut.lineEnd < 42)
+    assert.ok(!cut.text.includes('(complete)'))
+    assert.ok(!cut.text.includes('(rest of'))
+  } finally { store.close() }
+})
+
+test('fault never claims (complete) on a cap-limited slice', async () => {
+  const dir = tempDir()
+  cleanup.push(dir)
+  const root = path.join(dir, 'project')
+  fs.mkdirSync(root, { recursive: true })
+  fs.mkdirSync(path.join(root, 'src'), { recursive: true })
+  fs.writeFileSync(path.join(root, 'package.json'), '{"name":"cap-fixture","version":"1.0.0","type":"module"}')
+  const huge = ['// huge fixture', 'export function hugeThing(input) {']
+  for (let i = 0; i < 240; i++) huge.push(`  const v${i} = input + ${i}`)
+  huge.push('  return v0', '}', '')
+  fs.writeFileSync(path.join(root, 'src', 'huge.js'), huge.join('\n'))
+  const store = new MemoryStore({ dbPath: path.join(root, '.memai', 'mem.db'), root })
+  store.setMeta('root', root)
+  const pages = new MemoryPages({ store, root })
+  await pages.index({ maxFiles: 100 })
+  try {
+    // hugeThing spans lines 2-244; the slice caps at line 221. Big budget: the
+    // whole capped slice fits, so only the cap detection can keep the label honest.
+    const line = pages.fault('src/huge.js:5', { budget: 3000 })
+    assert.ok(line.ok, line.error)
+    assert.ok(!line.text.includes('(complete)'), `must not claim complete: ${line.text.split('\n')[0]}`)
+    assert.match(line.text, /capped at 220 lines/)
+    assert.equal(line.symbol, 'hugeThing')
+
+    const sym = pages.fault('hugeThing', { budget: 3000 })
+    assert.ok(sym.ok, sym.error)
+    assert.ok(!sym.text.includes('(complete)'), `must not claim complete: ${sym.text.split('\n')[0]}`)
+    assert.match(sym.text, /capped at 220 lines/)
+  } finally { store.close() }
+})
+
+test('fault path:line outside symbols keeps the window and names a continuing symbol', async () => {
+  const dir = tempDir()
+  cleanup.push(dir)
+  const root = path.join(dir, 'project')
+  fs.mkdirSync(root, { recursive: true })
+  fs.writeFileSync(path.join(root, 'package.json'), '{"name":"line-window","version":"1.0.0","type":"module"}')
+  fs.mkdirSync(path.join(root, 'src'), { recursive: true })
+  const w = ['// window fixture', 'export function tiny() {', '  return 1', '}', '']
+  w.push('export function longThing(a) {')
+  for (let i = 0; i < 69; i++) w.push(`  const x${i} = a + ${i}`)
+  w.push('  return x0', '}', '')
+  fs.writeFileSync(path.join(root, 'src', 'w.js'), w.join('\n'))
+  const store = new MemoryStore({ dbPath: path.join(root, '.memai', 'mem.db'), root })
+  store.setMeta('root', root)
+  const pages = new MemoryPages({ store, root })
+  await pages.index({ maxFiles: 100 })
+  try {
+    // Line 5 sits between tiny (2-4) and longThing (6-77); the window 5-64 cuts longThing.
+    const f = pages.fault('src/w.js:5', { budget: 400 })
+    assert.ok(f.ok, f.error)
+    assert.equal(f.mode, 'line')
+    assert.equal(f.line, 5)
+    assert.equal(f.lineEnd, 64)
+    assert.match(f.text, /\(window\)/)
+    assert.match(f.text, /\(longThing continues to 77\)/)
+    assert.equal(f.symbol, undefined)
+  } finally { store.close() }
+})
+
+test('fault path:line on a markdown file stays a window', async () => {
+  const { store, pages } = await indexedProject()
+  try {
+    const f = pages.fault('docs/auth.md:1')
+    assert.ok(f.ok, f.error)
+    assert.equal(f.mode, 'line')
+    assert.match(f.text, /\(window\)/)
+  } finally { store.close() }
+})
+
+test('fault path:line after an unindexed edit degrades to a stale window', async () => {
+  const { root, store, pages } = await indexedProject()
+  try {
+    const file = path.join(root, 'src', 'auth.js')
+    fs.writeFileSync(file, '// shifted\n// shifted\n' + fs.readFileSync(file, 'utf8'))
+    const f = pages.fault('src/auth.js:6')
+    assert.ok(f.ok, f.error)
+    assert.match(f.text, /\(window\)/)
+    assert.match(f.text, /STALE: file changed since index/)
   } finally { store.close() }
 })
 
