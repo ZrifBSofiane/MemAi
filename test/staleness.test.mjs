@@ -193,6 +193,37 @@ test('fault path:line on an oversized symbol labels the rest and the truncation'
   } finally { store.close() }
 })
 
+test('fault never claims (complete) on a cap-limited slice', async () => {
+  const dir = tempDir()
+  cleanup.push(dir)
+  const root = path.join(dir, 'project')
+  fs.mkdirSync(root, { recursive: true })
+  fs.mkdirSync(path.join(root, 'src'), { recursive: true })
+  fs.writeFileSync(path.join(root, 'package.json'), '{"name":"cap-fixture","version":"1.0.0","type":"module"}')
+  const huge = ['// huge fixture', 'export function hugeThing(input) {']
+  for (let i = 0; i < 240; i++) huge.push(`  const v${i} = input + ${i}`)
+  huge.push('  return v0', '}', '')
+  fs.writeFileSync(path.join(root, 'src', 'huge.js'), huge.join('\n'))
+  const store = new MemoryStore({ dbPath: path.join(root, '.memai', 'mem.db'), root })
+  store.setMeta('root', root)
+  const pages = new MemoryPages({ store, root })
+  await pages.index({ maxFiles: 100 })
+  try {
+    // hugeThing spans lines 2-243; the slice caps at line 221. Big budget: the
+    // whole capped slice fits, so only the cap detection can keep the label honest.
+    const line = pages.fault('src/huge.js:5', { budget: 3000 })
+    assert.ok(line.ok, line.error)
+    assert.ok(!line.text.includes('(complete)'), `must not claim complete: ${line.text.split('\n')[0]}`)
+    assert.match(line.text, /capped at 220 lines/)
+    assert.equal(line.symbol, 'hugeThing')
+
+    const sym = pages.fault('hugeThing', { budget: 3000 })
+    assert.ok(sym.ok, sym.error)
+    assert.ok(!sym.text.includes('(complete)'), `must not claim complete: ${sym.text.split('\n')[0]}`)
+    assert.match(sym.text, /capped at 220 lines/)
+  } finally { store.close() }
+})
+
 test('fault path:line outside symbols keeps the window and names a continuing symbol', async () => {
   const dir = tempDir()
   cleanup.push(dir)

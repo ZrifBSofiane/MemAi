@@ -514,6 +514,9 @@ export class MemoryPages {
     const lines = text.split('\n')
     const startLine = best.line
     const sl = sliceSymbol(lines, startLine, langOf(best.path) || 'js')
+    // sliceSymbol silently caps at 220 lines; a slice at the cap that does not
+    // reach end-of-file is a head, so `(complete)` would be a lie.
+    const capped = sl.end - sl.start >= 220 && sl.end < lines.length
     const code = lines.slice(sl.start, sl.end).join('\n')
     const s = this._fileStale(this.store.getFile(best.path))
     const stale = s ? s.stale : null
@@ -534,7 +537,7 @@ export class MemoryPages {
     }
     const header = (body) =>
       `# fault ${best.name} (${best.kind}) ${best.path}:${startLine}-${sl.end}  ${sl.end - sl.start}L  tokens=${body.tokens}/${budget}` +
-      (body.truncated ? `  (truncated: ${body.omittedLines ?? '?'} more lines)` : '  (complete)') +
+      (body.truncated ? `  (truncated: ${body.omittedLines ?? '?'} more lines)` : capped ? `  (head of ${best.name}; slice capped at 220 lines — the symbol's end was not verified)` : '  (complete)') +
       (stale ? '  [STALE: file changed since index — lines approximate]' : '') +
       (candidates.length > 1 ? `  (+${candidates.length - 1} other match${candidates.length > 2 ? 'es' : ''}: ${candidates.slice(1, 3).map((c) => `${c.path}:${c.line}`).join(', ')})` : '') +
       `\n# file page: get file:${best.path}`
@@ -543,7 +546,7 @@ export class MemoryPages {
       ok: true, target: name, mode: 'symbol', symbol: best.name, kind: best.kind, path: best.path, line: startLine, lineEnd: sl.end,
       lines: sl.end - sl.start, stale,
       deep: deepInfo ? { callees: deepInfo.callees.map((c) => ({ path: c.path, line: c.line, name: c.name, kind: c.kind })), callers: deepInfo.callers.map((c) => ({ path: c.path, line: c.line, name: c.name, kind: c.kind })) } : undefined,
-      tokens: r.tokens, budget, truncated: r.truncated, text: r.text,
+      tokens: r.tokens, budget, truncated: r.truncated || capped, text: r.text,
       also: candidates.slice(1, 4).map((c) => `${c.path}:${c.line}`),
     }
   }
@@ -571,19 +574,27 @@ export class MemoryPages {
       if (line < sl.end) { enc = sym; encSlice = sl; break }
     }
     if (enc) {
+      // Same cap check as _faultSymbol: a slice sliceSymbol capped at 220 lines
+      // is a head, not the whole symbol — it must never be labelled `(complete)`.
+      const capped = encSlice.end - encSlice.start >= 220 && encSlice.end < lines.length
       const whole = lines.slice(encSlice.start, encSlice.end).join('\n')
       const reqNote = line > enc.line ? `  (requested line ${line})` : ''
+      const wholeMark = capped ? `(head of ${enc.name}; slice capped at 220 lines — the symbol's end was not verified)` : '(complete)'
       const rWhole = fitWithHeader(whole, budget, (b) =>
-        `# fault ${enc.name} (${enc.kind}) ${f.path}:${enc.line}-${encSlice.end}  ${encSlice.end - enc.line}L  tokens=${b.tokens}/${budget}  (complete)${staleNote}${reqNote}`)
+        `# fault ${enc.name} (${enc.kind}) ${f.path}:${enc.line}-${encSlice.end}  ${encSlice.end - enc.line}L  tokens=${b.tokens}/${budget}  ${wholeMark}${staleNote}${reqNote}`)
       if (!rWhole.truncated) {
-        return { ok: true, target: `${p}:${line}`, mode: 'line', path: f.path, line: enc.line, lineEnd: encSlice.end, symbol: enc.name, symbolKind: enc.kind, requestedLine: line, stale, tokens: rWhole.tokens, budget, truncated: false, text: rWhole.text }
+        return { ok: true, target: `${p}:${line}`, mode: 'line', path: f.path, line: enc.line, lineEnd: encSlice.end, symbol: enc.name, symbolKind: enc.kind, requestedLine: line, stale, tokens: rWhole.tokens, budget, truncated: capped, text: rWhole.text }
       }
       const restText = lines.slice(line - 1, encSlice.end).map((l, i) => `${line + i}| ${l}`).join('\n')
       const rRest = fitWithHeader(restText, budget, (b) => {
         const shownEnd = b.truncated ? lastShownLine(b.text) ?? line : encSlice.end
-        const label = b.truncated
-          ? `(truncated: ${encSlice.end - shownEnd} more lines of ${enc.name}, which ends at ${encSlice.end})`
-          : `(rest of ${enc.name}; starts at ${enc.line})`
+        const label = capped
+          ? b.truncated
+            ? `(truncated: slice capped at 220 lines of ${enc.name} — the symbol's end was not verified)`
+            : `(rest of ${enc.name}; slice capped at 220 lines — the symbol's end was not verified)`
+          : b.truncated
+            ? `(truncated: ${encSlice.end - shownEnd} more lines of ${enc.name}, which ends at ${encSlice.end})`
+            : `(rest of ${enc.name}; starts at ${enc.line})`
         return `# fault ${f.path}:${line}  showing ${line}-${shownEnd} of ${lines.length}  tokens=${b.tokens}/${budget}  ${label}${staleNote}`
       })
       const shownEnd = rRest.truncated ? lastShownLine(rRest.text) ?? line : encSlice.end
