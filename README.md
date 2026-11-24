@@ -30,10 +30,10 @@ prompt tokens **7.8×** and cost **−56%** on that task.
 
 | Idea | In practice |
 | --- | --- |
-| **One small card** | `memai card` → stack, entrypoints, build/test commands, layout, conventions, paging rules. ~200 tokens, byte-stable, content-addressed. |
+| **One small card** | `memai card` → stack, entrypoints, build/test commands, layout, conventions, paging rules. ~200–280 tokens, byte-stable, content-addressed, with the current version for resume. |
 | **One manifest** | `memai map` → one line per file with LOC + top symbols, budget-capped. The agent knows what exists without reading it. |
-| **Demand paging** | `memai query` returns ranked `path:line` snippets; `memai fault` materialises one symbol body; `get file:<path>` returns signatures, not bodies. Every response is token-counted and clamped to a hard budget. |
-| **Merkle deltas** | `memai diff --since <hash>` returns added/changed/removed files plus symbol churn in ~100 tokens. A new session or a fresh subagent resumes from a version stamp. |
+| **Demand paging** | `memai query` returns ranked `path:line` snippets; `memai fault` materialises one symbol body — complete up to 1,200 tokens, labelled `(complete)` or `(truncated)`; `query --body --deep` returns the located body plus callers/callees in one call. Every response is token-counted and clamped to a hard budget. |
+| **Merkle deltas** | `memai diff --since <hash>` returns added/changed/removed files plus symbol churn in ~100 tokens; `diff --faults <sym>` appends the named slices. A new session or a fresh subagent resumes from a version stamp. |
 | **A shared board** | `note`/`post`/`inbox`/`merge` — append-only typed messages carrying page ids, never file bodies. Agents share state without model-written summaries or steering messages. |
 | **One integration surface** | A stdio [MCP](https://modelcontextprotocol.io) server (`memai-mcp`) plus a CLI (`memai`). `memai init` writes the per-agent instruction blocks and config snippets. |
 
@@ -50,26 +50,26 @@ limits are in [`bench/RESULTS.md`](bench/RESULTS.md).
 
 | scenario (14 tasks) | input tokens | cost (off-peak) |
 | --- | --- | --- |
-| A — grep + read the needed files | 67,149 | $0.010744 |
-| B — read + model-written summary handoff + re-read | 78,774 | $0.018707 |
-| C — card + curated paging plan | 14,861 | $0.002901 |
-| **C\* — card + paging + completion to 100% recall** | **21,958** | **$0.003966** |
+| A — grep + read the needed files | 91,465 | $0.014392 |
+| B — read + model-written summary handoff + re-read | 103,849 | $0.022924 |
+| C — card + curated paging plan | 16,724 | $0.003181 |
+| **C\* — card + paging + completion to 100% recall** | **24,216** | **$0.004304** |
 
-- **3.06× fewer input tokens** than naive file reads (45,191 tokens saved across
-  the 14 tasks), and **3.59×** fewer than the summary-handoff workflow.
-- **4.7× cheaper in dollars** than model-written handoffs (C\* $0.003966 vs B
-  $0.018707): one output token costs 200× a cache-hit input token, so writing
+- **3.78× fewer input tokens** than naive file reads (67,249 tokens saved across
+  the 14 tasks), and **4.29×** fewer than the summary-handoff workflow.
+- **5.3× cheaper in dollars** than model-written handoffs (C\* $0.004304 vs B
+  $0.022924): one output token costs 200× a cache-hit input token, so writing
   prose is the expensive way to move facts.
-- **5.6–9.5× fewer tokens to resume** after three files change: a ~102-token
-  diff + two faults (469 / 436 tokens) versus re-reading the changed files
+- **5.47–9.30× fewer tokens to resume** after three files change: a ~102-token
+  diff + two faults (477 / 444 tokens) versus re-reading the changed files
   (2,607 / 4,127 tokens).
 - Counterfactual on real logs: **7.8×** fewer prompt tokens, **−56%** cost for
   a last-8-tool-results retention policy ([`docs/evidence.md`](docs/evidence.md)).
 
 Every one of the 14 paged runs has **100% coverage** of the curated ground-truth
 file set; C\* includes the cost of paging every file the cheap plan missed. The
-per-task ratio ranges from 1.17× (a tiny single-file fixture task, where plain
-reads are already cheap) to 5.50× (a locate task on the real 288-file corpus).
+per-task ratio ranges from 1.10× (a tiny single-file fixture task, where plain
+reads are already cheap) to 10.02× (a review task on the real self-host corpus).
 
 > **Method note.** Token counts come from the shipped code over the real corpora,
 > with `tokens = ceil(chars / 3.966)` calibrated against provider-reported usage
@@ -96,22 +96,22 @@ Across **six questions** spanning task types:
 
 | | MemAi | graphify 0.9.34 |
 | --- | --- | --- |
-| Per-session instruction overhead | **986 tok** (one MCP tool schema) | 10,351 tok (`skill.md`, loaded per invocation) |
+| Per-session instruction overhead | **986 tok** (0.7.0 MCP tool schema; 1,058 in 0.11.0) | 10,351 tok (`skill.md`, loaded per invocation) |
 | Zero-token build coverage | **all 81 files** (code + docs + config) | code files only — docs/papers/images need its LLM extraction (real tokens) |
-| Totals across 6 questions | **1,438 tok — every answer complete** | 4,159 tok — 3 outright misses, 2 truncated, bodies still need file reads |
+| Totals across 6 questions | **1,438 tok — every answer complete (0.7.0)** | 4,159 tok — 3 outright misses, 2 truncated, bodies still need file reads |
 
 - **~2.9× fewer tokens across the six questions** (~10.5× less per-session
-  instruction overhead), with the answer being the code itself rather than an
-  address that still needs a read.
+  instruction overhead) in the 0.7.0 measurement, with the answer being the code
+  itself rather than an address that still needs a read.
 - Shortest path: `graph --shortest a b` answers the trace question
   ("bin/memai.mjs → src/store.mjs") in **39 tok** (2 hops, edge specs
   included); graphify's rebuild no longer connects that pair even in
   undirected mode. `affected <target>` adds transitive blast radius in one
   page.
 - Self-measured retrieval (`memai eval`, 12 shipped fixtures): recall@5
-  **100%**, MRR **0.80** (index) / **0.73** (hybrid). A 40-fixture development
+  **100%**, MRR **0.80** (index) / **0.74** (hybrid). A 40-fixture development
   matrix (`bench/eval-fixtures-ext.json`, not the public baseline) scores 85% /
-  93% and is what the ranking changes below are validated against.
+  90% and is what the 0.11.0 ranking fixes are validated against.
 - Where graphify genuinely wins: architecture-wide discovery (community
   detection, god nodes), mixed corpora (papers, images, video), cross-repo
   merged graphs, and human-facing HTML/GraphRAG exports. MemAi does none of
@@ -120,7 +120,32 @@ Across **six questions** spanning task types:
 > **Method note.** Token counts measured with the same `chars / 3.966`
 > estimator on both sides; graphify queried through its CLI at its default
 > 2,000-token budget. Six questions, one repo, one machine — a navigation
-> benchmark, **not** a feature-parity claim.
+> benchmark, **not** a feature-parity claim. This table is a **0.7.0**
+> measurement; the 0.9–0.11 levers are gated separately below.
+
+## 0.9–0.11 feature benchmarks
+
+Every turn/ranking change since 0.7.0 was gated by its own same-corpus A/B; the
+shipped and discarded records are in `bench/`.
+
+| lever | gate | result |
+| --- | --- | --- |
+| 0.9.0 fault completeness | live billed A/B, 3 tasks | **−31.5%** total; target task **−58.2%** (removed grep + Read) |
+| 0.10.0 composite ops | live billed A/B, 2 tasks | **−28.5%**, **25 → 18** local CLI calls |
+| 0.11.0 ranking | same-tree eval A/B | shipped MRR **0.68/0.61 → 0.80/0.74**; extended recall **83/88 → 85/90%**; no loss |
+| payload `--text` docs | live billed A/B | **+19%** — discarded |
+| compact block/skill/card | live billed A/B | **+151%** — discarded |
+| compact schema/instructions | live billed A/B | **+9%** — unproven, not shipped |
+| stop-rule line | live billed A/B | **+26%** — discarded |
+
+Full records:
+[0.9.0 fault](bench/BENCHMARK-0.9.0-fault-complete.md) ·
+[0.10.0 composite](bench/BENCHMARK-0.10.0-composite.md) ·
+[0.11.0 ranking](bench/BENCHMARK-0.11.0-ranking.md) ·
+[negative payload](bench/NEGATIVE-payload.md) ·
+[negative block/skill](bench/NEGATIVE-overhead-B.md) ·
+[negative overhead](bench/NEGATIVE-overhead.md) ·
+[negative stop rule](bench/NEGATIVE-stop-rule.md)
 
 ## Freshness automation
 
@@ -207,12 +232,13 @@ npx -y memai-cli init --agent all
 npx -y memai-cli index
 
 # 3. Use it
-npx -y memai-cli card                  # ~200-token orientation, once per session
+npx -y memai-cli card                  # ~270-token orientation, once per session
 npx -y memai-cli query "where is auth checked"
-npx -y memai-cli query "verify token" --body   # locate + the top symbol body, one call
-npx -y memai-cli fault verifyToken     # one body slice, budget-clamped
+npx -y memai-cli query "verify token" --body --deep   # locate + body + callers/callees, one call
+npx -y memai-cli fault verifyToken     # one complete body slice (up to 1,200 tok), labelled
 npx -y memai-cli fault verifyToken,issueToken  # batch: several slices, one call
 npx -y memai-cli diff --since <version>  # on the next session / in a subagent
+npx -y memai-cli diff --since <version> --faults verifyToken  # delta + the changed slice
 ```
 
 Or install once — there is nothing to compile and no runtime dependency:
@@ -388,6 +414,10 @@ PROTOCOL.md   normative page/version/delta/tool contract for implementers
 - [Design & cost model](docs/design.md)
 - [Evidence: where the tokens go](docs/evidence.md)
 - [Benchmark results](bench/RESULTS.md)
+- [Complete 0.11.0 benchmark](bench/BENCHMARK-0.11.0.md) ·
+  [0.9.0 fault](bench/BENCHMARK-0.9.0-fault-complete.md) ·
+  [0.10.0 composite](bench/BENCHMARK-0.10.0-composite.md) ·
+  [0.11.0 ranking](bench/BENCHMARK-0.11.0-ranking.md)
 - [Head-to-head vs graphify](bench/BENCHMARK-0.5.0.md) ·
   [archive: 0.4.0](bench/BENCHMARK-0.4.0.md) ·
   [archive: 0.3.0](bench/BENCHMARK-0.3.0.md) ·

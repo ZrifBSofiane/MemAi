@@ -1,0 +1,96 @@
+{
+  "date": "2026-11-23",
+  "set": "stoprule",
+  "dirs": {
+    "baseline": "D:\\Projects\\MemAi-srbase",
+    "treatment": "D:\\Projects\\MemAi-srtreat"
+  },
+  "verdict": {
+    "ok": false,
+    "failures": [
+      "S1: treatment 375229 > baseline 363778 (+1% tolerance)",
+      "S2: treatment 553041 > baseline 372676 (+1% tolerance)",
+      "total 928270 >= baseline 736454"
+    ],
+    "baseTotal": 736454,
+    "treatTotal": 928270
+  },
+  "rows": [
+    {
+      "id": "S1",
+      "arm": "baseline",
+      "dir": "D:\\Projects\\MemAi-srbase",
+      "session": "sess_ace15c8c-e13a-4cc7-a21a-b3df03112594",
+      "exit": 0,
+      "ok": true,
+      "billedInput": 363778,
+      "turns": 1,
+      "toolCalls": 4,
+      "toolErrors": 0,
+      "cliCalls": 4,
+      "memCalls": 0,
+      "valid": true,
+      "requireFewerCalls": false,
+      "tolerancePct": 1,
+      "correct": true,
+      "stdoutTail": " ages out of the window. This caps the flush rate at 30/min no matter how many events arrive. `startWatcher` logs a \"circuit breaker\" line once per breach and resets the flag when the delay drops back to `debounceMs`.\n\n`flushTimes` records `Date.now()` at each flush start (trimmed to the last 64 entries), and the flush itself is serialised through a promise `chain` so SQLite writes never overlap.\n"
+    },
+    {
+      "id": "S2",
+      "arm": "baseline",
+      "dir": "D:\\Projects\\MemAi-srbase",
+      "session": "sess_5e630b64-c3b2-4108-9970-27be28c12272",
+      "exit": 0,
+      "ok": true,
+      "billedInput": 372676,
+      "turns": 1,
+      "toolCalls": 5,
+      "toolErrors": 0,
+      "cliCalls": 4,
+      "memCalls": 0,
+      "valid": true,
+      "requireFewerCalls": false,
+      "tolerancePct": 1,
+      "correct": true,
+      "stdoutTail": "me`), so a checkout/merge that touches mtimes doesn't force re-extraction or leave the stale scan reporting forever.\n- **Reuse is cheaper, not free.** The file is still read and hashed (`readFileSync` + `sha1`); what's skipped is symbol extraction, page rendering, and the symbol/import/page rewrites — on reuse those rows are read back out of the store instead (`symbolsForPage`, `importsForFile`).\n"
+    },
+    {
+      "id": "S1",
+      "arm": "treatment",
+      "dir": "D:\\Projects\\MemAi-srtreat",
+      "session": "sess_04beece4-5564-4b3c-b1b7-c2636108048b",
+      "exit": 0,
+      "ok": true,
+      "billedInput": 375229,
+      "turns": 1,
+      "toolCalls": 4,
+      "toolErrors": 0,
+      "cliCalls": 3,
+      "memCalls": 0,
+      "valid": true,
+      "requireFewerCalls": false,
+      "tolerancePct": 1,
+      "correct": true,
+      "stdoutTail": "ength < maxPerMinute) return debounceMs\n  return Math.max(debounceMs, within[0] + windowMs - now)\n}\n```\n\n- Keeps only flush start times from the last 60 s (`windowMs`).\n- Under 30 flushes in that window → plain debounce, 800 ms.\n- At/over the cap → waits until the oldest in-window flush ages out (`within[0] + windowMs - now`), never less than the 800 ms base — so flushes are throttled to ≤30/min.\n"
+    },
+    {
+      "id": "S2",
+      "arm": "treatment",
+      "dir": "D:\\Projects\\MemAi-srtreat",
+      "session": "sess_fcd9d582-67fd-4a07-83c4-e38f2a16ac6d",
+      "exit": 0,
+      "ok": true,
+      "billedInput": 553041,
+      "turns": 1,
+      "toolCalls": 6,
+      "toolErrors": 0,
+      "cliCalls": 5,
+      "memCalls": 0,
+      "valid": true,
+      "requireFewerCalls": false,
+      "tolerancePct": 1,
+      "correct": true,
+      "stdoutTail": "ken from the store; otherwise symbols/imports are re-extracted and `setSymbols`/`setImports`/`upsertPage` are rewritten.\n- `indexCorpus()` (`src/extract.mjs:697-725`) just tallies `reused` vs. `readFiles`, deletes rows for paths missing from the listing, and threads `force` through.\n\nSo in one line: **unchanged bytes + unchanged extractor version = reuse; anything else (or `force`) re-extracts.**\n"
+    }
+  ]
+}
