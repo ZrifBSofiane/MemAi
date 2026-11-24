@@ -88,7 +88,7 @@ cd /d/Projects/MemAi
 node tools/body-eval.mjs bench/eval-fixtures-ext.json --out .tmp/120-base-body-ext.json
 node tools/body-eval.mjs bench/eval-fixtures.json --out .tmp/120-base-body-shipped.json
 ```
-Expected: ext prints `body: file=58%  (23/40)`; shipped prints `body: file=83%  (10/12)`. These two numbers are the baseline in the spec gate table. (Ext rows must match the analysis recorded in the spec: same fixture order, same right-set.)
+Expected: ext prints `body: file=58%  (23/40)`; shipped prints `body: file=67%  (8/12)` (measured baseline; the 4 shipped misses are a subset of the ext misses). These two numbers are the baseline in the spec gate table. (Ext rows must match the analysis recorded in the spec: same fixture order, same right-set.)
 
 - [ ] **Step 3: Commit**
 
@@ -1014,7 +1014,7 @@ Insert directly below the first `## ` heading region of `CHANGELOG.md` (match th
   matches with stopwords dropped, file rank, and body-only terms — with a
   confidence floor: below it the reply says `body: none` instead of guessing a
   tiny unrelated function. Body-from-expected-file on the eval fixtures:
-  extended 23 → <EXT_AFTER> of 40, shipped 10 → 12 of 12.
+  extended 23 → <EXT_AFTER> of 40, shipped 8 → 12 of 12.
 - `fault <path>:<line>` returns the enclosing indexed symbol: `(complete)` only
   when the whole symbol is shown, `(rest of …)`/`(truncated: …)` inside an
   oversized symbol, `(window)` outside symbols. The 60-line mid-function window
@@ -1042,7 +1042,7 @@ Estimator `ceil(chars/3.966)`; all eval numbers local, no model calls.
 | metric | baseline | 0.12.0 | gate |
 | --- | ---: | ---: | --- |
 | body from expected file, extended (40) | 23 | <EXT_AFTER> | ≥ 34 |
-| body from expected file, shipped (12) | 10 | 12 | 12 |
+| body from expected file, shipped (12) | 8 | 12 | 12 |
 | fixtures right at baseline that turned wrong | — | 0 | 0 |
 | recall@5 shipped (index/hybrid) | 100 % / 100 % | <paste> | identical |
 | MRR shipped (index/hybrid) | 0.80 / 0.74 | <paste> | identical |

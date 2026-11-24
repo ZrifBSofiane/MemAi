@@ -203,7 +203,7 @@ Additive only; no existing benchmark page is rewritten.
 | Number | Baseline | Gate |
 | --- | ---: | --- |
 | body from expected file, extended (40) | 23 | **≥ 34** |
-| body from expected file, shipped (12) | 10 | **12** |
+| body from expected file, shipped (12) | 8 | **12** |
 | fixtures right at baseline that become wrong | — | **0** |
 | recall@5 / MRR, index and hybrid, both fixture sets | shipped 100 % / 0.80 · 0.74; extended 85 % / 0.61 · 90 % / 0.57 | **identical** |
 | static surfaces and delivered rows (`bench/cost.mjs --check`) | `COST-BASELINE-0.11.0.md` | **exit 0** |
