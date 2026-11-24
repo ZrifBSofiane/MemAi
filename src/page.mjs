@@ -514,7 +514,7 @@ export class MemoryPages {
       const reqNote = line > enc.line ? `  (requested line ${line})` : ''
       const wholeMark = capped ? `(head of ${enc.name}; slice capped at 220 lines — the symbol's end was not verified)` : '(complete)'
       const rWhole = fitWithHeader(whole, budget, (b) =>
-        `# fault ${enc.name} (${enc.kind}) ${f.path}:${enc.line}-${encSlice.end}  ${encSlice.end - enc.line}L  tokens=${b.tokens}/${budget}  ${wholeMark}${staleNote}${reqNote}`)
+        `# fault ${enc.name} (${enc.kind}) ${f.path}:${enc.line}-${encSlice.end}  ${encSlice.end - encSlice.start}L  tokens=${b.tokens}/${budget}  ${wholeMark}${staleNote}${reqNote}`)
       if (!rWhole.truncated) {
         return { ok: true, target: `${p}:${line}`, mode: 'line', path: f.path, line: enc.line, lineEnd: encSlice.end, symbol: enc.name, symbolKind: enc.kind, requestedLine: line, stale, tokens: rWhole.tokens, budget, truncated: capped, text: rWhole.text }
       }
@@ -531,7 +531,7 @@ export class MemoryPages {
         return `# fault ${f.path}:${line}  showing ${line}-${shownEnd} of ${lines.length}  tokens=${b.tokens}/${budget}  ${label}${staleNote}`
       })
       const shownEnd = rRest.truncated ? lastShownLine(rRest.text) ?? line : encSlice.end
-      return { ok: true, target: `${p}:${line}`, mode: 'line', path: f.path, line, lineEnd: shownEnd, symbol: enc.name, symbolKind: enc.kind, requestedLine: line, stale, tokens: rRest.tokens, budget, truncated: rRest.truncated, text: rRest.text }
+      return { ok: true, target: `${p}:${line}`, mode: 'line', path: f.path, line, lineEnd: shownEnd, symbol: enc.name, symbolKind: enc.kind, requestedLine: line, stale, tokens: rRest.tokens, budget, truncated: rRest.truncated || capped, text: rRest.text }
     }
     // Not inside a symbol: the historical 60-line window.
     const from = Math.max(0, line - 1)

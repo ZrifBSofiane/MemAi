@@ -209,7 +209,7 @@ test('fault never claims (complete) on a cap-limited slice', async () => {
   const pages = new MemoryPages({ store, root })
   await pages.index({ maxFiles: 100 })
   try {
-    // hugeThing spans lines 2-243; the slice caps at line 221. Big budget: the
+    // hugeThing spans lines 2-244; the slice caps at line 221. Big budget: the
     // whole capped slice fits, so only the cap detection can keep the label honest.
     const line = pages.fault('src/huge.js:5', { budget: 3000 })
     assert.ok(line.ok, line.error)
